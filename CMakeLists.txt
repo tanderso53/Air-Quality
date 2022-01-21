@@ -12,11 +12,10 @@ pico_sdk_init()
 
 add_executable(air-quality
 	src/air-quality.c
+	src/bme680-interface.c
 	BME68x-Sensor-API/bme68x.c
 	)
 
-#add_library(bme68x STATIC
-#	BME68x-Sensor-API/bme68x.c)
 target_include_directories(air-quality BEFORE PRIVATE
 	BME68x-Sensor-API)
 
