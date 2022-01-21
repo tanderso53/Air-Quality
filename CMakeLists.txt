@@ -16,9 +16,14 @@ add_executable(air-quality
 	BME68x-Sensor-API/bme68x.c
 	)
 
+pico_enable_stdio_usb(air-quality 1)
+pico_enable_stdio_uart(air-quality 0)
+
 target_include_directories(air-quality BEFORE PRIVATE
 	BME68x-Sensor-API)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c)
+
+add_compile_definitions(BME680_INTERFACE_SELFTEST=1)
 
 pico_add_extra_outputs(air-quality)

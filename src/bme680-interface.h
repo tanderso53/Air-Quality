@@ -17,6 +17,7 @@ extern "C" {
 	typedef struct {
 		i2c_inst_t *i2c;
 		uint8_t dev_addr;
+		int32_t timeout;
 		struct bme68x_dev bme_dev;
 		struct bme68x_conf conf;
 		struct bme68x_heatr_conf heatr;
@@ -72,6 +73,11 @@ extern "C" {
 	 * @brief De-initialize pico-sdk's i2c interface
 	 */
 	int deinit_bme680_sensor(bme680_intf *b_intf);
+
+	/**
+	 * @brief Run BME680 Self Test
+	 */
+	int8_t selftest_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr);
 
 
 #ifdef __cplusplus

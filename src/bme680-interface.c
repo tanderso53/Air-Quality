@@ -11,25 +11,42 @@ int8_t bme680_i2c_read(uint8_t reg_addr, uint8_t *reg_data,
 	bme680_intf *intf = (bme680_intf*) intf_ptr;
 
 	if (intf_ptr == NULL) {
-		return 1;
+		return BME68X_E_NULL_PTR;
 	}
 
 	/* Write a byte with the register offset first but don't send
 	 * stop. Then begin the read that will start at that offset */
-	i2c_write_blocking(intf->i2c, intf->dev_addr,
-			   &reg_addr, 1, true);
-	num_bytes = i2c_read_blocking(intf->i2c, intf->dev_addr,
-				      reg_data, (uint16_t) len, false);
+	if (intf->timeout < 0) {
+		i2c_write_blocking(intf->i2c, intf->dev_addr,
+				   &reg_addr, 1, true);
+		num_bytes = i2c_read_blocking(intf->i2c, intf->dev_addr,
+					      reg_data, (uint16_t) len, false);
+	} else {
+		absolute_time_t to;
+
+		to = make_timeout_time_ms(intf->timeout);
+		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
+						     &reg_addr, 1, true, to);
+
+		if (num_bytes == PICO_ERROR_TIMEOUT) {
+			return BME68X_E_COM_FAIL;
+		}
+
+		to = make_timeout_time_ms(intf->timeout * len);
+		num_bytes = i2c_read_blocking_until(intf->i2c, intf->dev_addr,
+						    reg_data, (uint16_t) len,
+						    false, to);
+
+		if (num_bytes == PICO_ERROR_TIMEOUT) {
+			return BME68X_E_COM_FAIL;
+		}
+	}
 
 	if (num_bytes == PICO_ERROR_GENERIC) {
-		return PICO_ERROR_GENERIC;
+		return BME68X_E_COM_FAIL;
 	}
 
-	if ((uint32_t) num_bytes != len) {
-		return 1;
-	}
-
-	return 0;
+	return BME68X_OK;
 }
 
 int8_t bme680_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
@@ -39,25 +56,77 @@ int8_t bme680_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
 	bme680_intf *intf = (bme680_intf*) intf_ptr;
 
 	if (intf_ptr == NULL) {
-		return 1;
+		return BME68X_E_NULL_PTR;
 	}
 
 	/* Write a byte with the register offset first but don't send
 	 * stop. Then begin the read that will start at that offset */
-	i2c_write_blocking(intf->i2c, intf->dev_addr,
-			   &reg_addr, 1, true);
-	num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
-				       reg_data, (uint16_t) len, false);
+		
+	for (uint32_t i = 0; i < len - 1; i++) {
+		uint8_t i_addr = reg_addr + i;
+
+		if (intf->timeout < 0) {
+			i2c_write_blocking(intf->i2c, intf->dev_addr,
+					   &i_addr, 1, true);
+
+			num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
+						       &reg_data[i], 1, true);
+		} else {
+			absolute_time_t to;
+
+			to = make_timeout_time_ms(intf->timeout);
+			num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
+							     &i_addr, 1, true, to);
+
+			if (num_bytes == PICO_ERROR_TIMEOUT) {
+				return BME68X_E_COM_FAIL;
+			}
+
+			num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
+							     &reg_data[i], 1, true, to);
+
+			if (num_bytes == PICO_ERROR_TIMEOUT) {
+				return BME68X_E_COM_FAIL;
+			}
+		}
+
+		if (num_bytes == PICO_ERROR_GENERIC) {
+			return BME68X_E_COM_FAIL;
+		}
+	}
+
+	if (intf->timeout < 0) {
+		uint8_t end_addr = (len - 1) + reg_addr;
+		i2c_write_blocking(intf->i2c, intf->dev_addr,
+				   &end_addr, 1, true);
+
+		num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
+					       &reg_data[len - 1], 1, false);
+	} else {
+		absolute_time_t to;
+		uint8_t end_addr = (len - 1) + reg_addr;
+
+		to = make_timeout_time_ms(intf->timeout);
+		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
+						     &end_addr, 1, true, to);
+
+		if (num_bytes == PICO_ERROR_TIMEOUT) {
+			return BME68X_E_COM_FAIL;
+		}
+
+		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
+						     &reg_data[len - 1], 1, false, to);
+
+		if (num_bytes == PICO_ERROR_TIMEOUT) {
+			return BME68X_E_COM_FAIL;
+		}
+	}
 
 	if (num_bytes == PICO_ERROR_GENERIC) {
-		return PICO_ERROR_GENERIC;
+		return BME68X_E_COM_FAIL;
 	}
 
-	if ((uint32_t) num_bytes != len) {
-		return 1;
-	}
-
-	return 0;
+	return BME68X_OK;
 }
 
 void bme680_delay_us(uint32_t period, void *intf_ptr)
@@ -70,10 +139,6 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 {
 	uint8_t ret;
 
-	/* needed for logging, hopefully board config picks right
-	 * input/outputs */
-	stdio_init_all();
-	
 	/* Initialize I2C,
 	 * note: given baudrate may note match actual */
 	if (!b_intf->i2c) {
@@ -102,7 +167,7 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 	ret = bme68x_init(&b_intf->bme_dev);
 
 	if (ret != BME68X_OK) {
-		return 1;
+		return ret;
 	}
 
 	/* Initial configuration settings and check success */
@@ -115,7 +180,7 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 	ret = bme68x_set_conf(&b_intf->conf, &b_intf->bme_dev);
 
 	if (ret != BME68X_OK) {
-		return 1;
+		return ret;
 	}
 
 	/* Configure heater sequence and check success */
@@ -127,7 +192,7 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 				    &b_intf->bme_dev);
 
 	if (ret != BME68X_OK) {
-		return 1;
+		return ret;
 	}
 
 	return 0;
@@ -146,7 +211,7 @@ int sample_bme680_sensor(bme680_run_mode mode, bme680_intf *b_intf,
 					 &b_intf->bme_dev);
 
 		if (ret != BME68X_OK) {
-			return 1;
+			return ret;
 		}
 
 		dur = bme68x_get_meas_dur(BME68X_FORCED_MODE, &b_intf->conf,
@@ -158,7 +223,7 @@ int sample_bme680_sensor(bme680_run_mode mode, bme680_intf *b_intf,
 				      &b_intf->bme_dev);
 
 		if (ret != BME68X_OK) {
-			return 1;
+			return ret;
 		}
 
 		break;
@@ -183,4 +248,44 @@ int deinit_bme680_sensor(bme680_intf *b_intf)
 	i2c_deinit(b_intf->i2c);
 
 	return 0;
+}
+
+int8_t selftest_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr)
+{
+	int8_t ret;
+
+	if (!b_intf) {
+		return 1;
+	}
+
+	/* Initialize I2C,
+	 * note: given baudrate may note match actual */
+	if (!b_intf->i2c) {
+		b_intf->i2c = i2c_default;
+	}
+
+	i2c_init(b_intf->i2c, 100000);
+
+	/* TODO: Alow gpio of non-default i2c pins to be set up */
+	gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);
+	gpio_set_function(PICO_DEFAULT_I2C_SCL_PIN, GPIO_FUNC_I2C);
+	gpio_pull_up(PICO_DEFAULT_I2C_SDA_PIN);
+	gpio_pull_up(PICO_DEFAULT_I2C_SCL_PIN);
+
+	b_intf->dev_addr = dev_addr;
+
+	/* Set up BME680 */
+	b_intf->bme_dev.intf_ptr = (void*) b_intf;
+	b_intf->bme_dev.intf = BME68X_I2C_INTF;
+	b_intf->bme_dev.amb_temp = 20;
+	b_intf->bme_dev.read = bme680_i2c_read;
+	b_intf->bme_dev.write = bme680_i2c_write;
+	b_intf->bme_dev.delay_us = bme680_delay_us;
+
+	/* Run BME68x library selftest */
+	ret = bme68x_selftest_check(&b_intf->bme_dev);
+
+	deinit_bme680_sensor(b_intf);
+
+	return ret;
 }
