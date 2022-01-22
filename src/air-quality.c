@@ -1,4 +1,5 @@
 #include "bme680-interface.h"
+#include "ws2812.pio.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -7,6 +8,10 @@
 
 #ifndef AIR_QUALITY_STATUS_LED
 #define AIR_QUALITY_STATUS_LED 13
+#endif
+
+#ifndef AIR_QUALITY_INFO_LED_PIN
+#define AIR_QUALITY_INFO_LED_PIN 16
 #endif
 
 typedef struct {
@@ -23,9 +28,19 @@ void air_quality_handle_error(int16_t);
  */
 void air_quality_print_data(struct bme68x_data *d);
 
+static void init_info_led();
+
+static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b);
+
 void air_quality_handle_error(int16_t err)
 {
 	printf("There was an error %d\n", err);
+
+	if (err > 0) {
+		write_info_led_color(120, 120, 0);
+	} else if (err < 0) {
+		write_info_led_color(255, 0, 0);
+	}
 }
 
 void air_quality_print_data(struct bme68x_data *d)
@@ -99,6 +114,24 @@ void air_quality_status_led_off(air_quality_led_config *conf)
 	conf->lastblink = get_absolute_time();
 }
 
+static void init_info_led()
+{
+	ws2812_program_init(pio0, 0, pio_add_program(pio0, &ws2812_program),
+			    AIR_QUALITY_INFO_LED_PIN, 800000, false);
+}
+
+static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b)
+{
+	uint32_t urgb;
+
+	/* Load int 32u bit int ordered g, r, b left to right */
+	urgb = ((uint32_t) (r) << 8) | ((uint32_t) (g) << 16) | (uint32_t) (b);
+
+	pio_sm_put_blocking(pio0, 0, urgb << 8u); /* RGB value only 24 bit */
+
+	/* Note: this function will block if pio buffer is full */
+}
+
 int main() {
 	bme680_intf b_intf;
 	bme680_run_mode m = FORCED_MODE;
@@ -123,6 +156,8 @@ int main() {
 	/* Turn on status LED */
 	air_quality_status_led_init(&led_conf, -1);
 	air_quality_status_led_on(&led_conf);
+	init_info_led();
+	write_info_led_color(0, 255, 0);
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -139,9 +174,11 @@ int main() {
 	} else if (ret > 0) {
 		printf("BME680 Selftest WARNING with code %d...Continuing...\n",
 		       ret);
+		write_info_led_color(120, 120, 0);
 	} else {
 		printf("BME680 Selftest FAILURE with code %d...Ending...\n",
 			ret);
+		write_info_led_color(255, 0, 0);
 		return 1;
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */
