@@ -37,9 +37,9 @@ void air_quality_handle_error(int16_t err)
 	printf("There was an error %d\n", err);
 
 	if (err > 0) {
-		write_info_led_color(120, 120, 0);
+		write_info_led_color(50, 50, 0);
 	} else if (err < 0) {
-		write_info_led_color(255, 0, 0);
+		write_info_led_color(75, 0, 0);
 	}
 }
 
@@ -51,7 +51,7 @@ void air_quality_print_data(struct bme68x_data *d)
 	       "\"humididity\": %.2f, "
 	       "\"gas_resistance\": %.2f}, "
 	       "\"status\": {"
-	       "\"sensor\": \"%x\"}}",
+	       "\"sensor\": \"%x\"}}\n",
 	       d->temperature, d->pressure, d->humidity,
 	       d->gas_resistance, d->status);
 }
@@ -157,7 +157,7 @@ int main() {
 	air_quality_status_led_init(&led_conf, -1);
 	air_quality_status_led_on(&led_conf);
 	init_info_led();
-	write_info_led_color(0, 255, 0);
+	write_info_led_color(0, 75, 0);
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -174,11 +174,11 @@ int main() {
 	} else if (ret > 0) {
 		printf("BME680 Selftest WARNING with code %d...Continuing...\n",
 		       ret);
-		write_info_led_color(120, 120, 0);
+		write_info_led_color(50, 50, 0);
 	} else {
 		printf("BME680 Selftest FAILURE with code %d...Ending...\n",
 			ret);
-		write_info_led_color(255, 0, 0);
+		write_info_led_color(75, 0, 0);
 		return 1;
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */

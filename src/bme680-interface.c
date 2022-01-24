@@ -63,27 +63,17 @@ int8_t bme680_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
 	 * stop. Then begin the read that will start at that offset */
 		
 	for (uint32_t i = 0; i < len - 1; i++) {
-		uint8_t i_addr = reg_addr + i;
+		uint8_t wrt_data[] = {reg_addr + i, reg_data[i]};
 
 		if (intf->timeout < 0) {
-			i2c_write_blocking(intf->i2c, intf->dev_addr,
-					   &i_addr, 1, true);
-
 			num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
-						       &reg_data[i], 1, true);
+						       wrt_data, 2, true);
 		} else {
 			absolute_time_t to;
 
-			to = make_timeout_time_ms(intf->timeout);
+			to = make_timeout_time_ms(intf->timeout * 2);
 			num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-							     &i_addr, 1, true, to);
-
-			if (num_bytes == PICO_ERROR_TIMEOUT) {
-				return BME68X_E_COM_FAIL;
-			}
-
-			num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-							     &reg_data[i], 1, true, to);
+							     wrt_data, 2, true, to);
 
 			if (num_bytes == PICO_ERROR_TIMEOUT) {
 				return BME68X_E_COM_FAIL;
@@ -96,26 +86,17 @@ int8_t bme680_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
 	}
 
 	if (intf->timeout < 0) {
-		uint8_t end_addr = (len - 1) + reg_addr;
-		i2c_write_blocking(intf->i2c, intf->dev_addr,
-				   &end_addr, 1, true);
+		uint8_t wrt_data[] = {(len - 1) + reg_addr, reg_data[len - 1]};
 
 		num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
-					       &reg_data[len - 1], 1, false);
+					       wrt_data, 2, false);
 	} else {
 		absolute_time_t to;
-		uint8_t end_addr = (len - 1) + reg_addr;
+		uint8_t wrt_data[] = {(len - 1) + reg_addr, reg_data[len - 1]};
 
 		to = make_timeout_time_ms(intf->timeout);
 		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-						     &end_addr, 1, true, to);
-
-		if (num_bytes == PICO_ERROR_TIMEOUT) {
-			return BME68X_E_COM_FAIL;
-		}
-
-		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-						     &reg_data[len - 1], 1, false, to);
+						     wrt_data, 2, false, to);
 
 		if (num_bytes == PICO_ERROR_TIMEOUT) {
 			return BME68X_E_COM_FAIL;
