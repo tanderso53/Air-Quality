@@ -29,6 +29,6 @@ target_include_directories(air-quality BEFORE PRIVATE
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio)
 
-add_compile_definitions(BME680_INTERFACE_SELFTEST=1)
+#add_compile_definitions(BME680_INTERFACE_SELFTEST=1)
 
 pico_add_extra_outputs(air-quality)

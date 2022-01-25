@@ -26,7 +26,7 @@ void air_quality_handle_error(int16_t);
 /** @brief Print out data from environmental sensors as json string
  * @p d Data struct from bme68x vendor library
  */
-void air_quality_print_data(struct bme68x_data *d);
+void air_quality_print_data(struct bme68x_data *d, uint32_t millis);
 
 static void init_info_led();
 
@@ -43,17 +43,32 @@ void air_quality_handle_error(int16_t err)
 	}
 }
 
-void air_quality_print_data(struct bme68x_data *d)
+void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 {
-	printf("{\"data\": {"
-	       "\"temperature\": %.2f, "
-	       "\"pressure\": %.2f, "
-	       "\"humididity\": %.2f, "
-	       "\"gas_resistance\": %.2f}, "
+	printf("{\"data\": ["
+	       "{\"name\": \"temperature\", "
+	       "\"value\": %.2f, "
+	       "\"unit\": \"degC\", "
+	       "\"timemillis\": %d},"
+	       "{\"name\": \"pressure\", "
+	       "\"value\": %.2f, "
+	       "\"unit\": \"Pa\", "
+	       "\"timemillis\": %d},"
+	       "{\"name\": \"humidity\", "
+	       "\"value\": %.2f, "
+	       "\"unit\": \"Percent\", "
+	       "\"timemillis\": %d},"
+	       "{\"name\": \"gas resistance\", "
+	       "\"value\": %.2f, "
+	       "\"unit\": \"ul\", "
+	       "\"timemillis\": %d}],"
 	       "\"status\": {"
-	       "\"sensor\": \"%x\"}}\n",
-	       d->temperature, d->pressure, d->humidity,
-	       d->gas_resistance, d->status);
+	       "\"sensor\": \"0x%x\"}}\n",
+	       d->temperature, millis,
+	       d->pressure, millis,
+	       d->humidity, millis,
+	       d->gas_resistance, millis,
+	       d->status);
 }
 
 void air_quality_status_led_init(air_quality_led_config *conf,
@@ -143,6 +158,7 @@ int main() {
 
 	stdio_init_all();
 
+#ifdef AIR_QUALITY_WAIT_CONNECTION
 	for (;;) {
 
 		if (stdio_usb_connected()) {
@@ -152,6 +168,7 @@ int main() {
 
 		sleep_ms(100);
 	}
+#endif /* AIR_QUALITY_WAIT_CONNECTION */
 
 	/* Turn on status LED */
 	air_quality_status_led_init(&led_conf, -1);
@@ -202,6 +219,8 @@ int main() {
 	/* Keep polling the sensor for data if initialization was
 	 * successful. This loop will only break on error. */
 	for (;;) {
+		absolute_time_t readtime;
+
 		air_quality_status_led_on(&led_conf);
 
 		if (absolute_time_diff_us(next_sample_time, get_absolute_time()) < 0) {
@@ -209,7 +228,8 @@ int main() {
 		}
 
 		ret = sample_bme680_sensor(m, &b_intf, &d);
-		next_sample_time = make_timeout_time_ms(sample_delay_ms);
+		readtime = get_absolute_time();
+		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
 			continue;
@@ -220,7 +240,7 @@ int main() {
 			break;
 		}
 
-		air_quality_print_data(&d);
+		air_quality_print_data(&d, to_ms_since_boot(readtime));
 	}
 
 	/* Deinit i2c if loop broke */
