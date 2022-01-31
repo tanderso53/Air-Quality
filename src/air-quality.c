@@ -157,7 +157,7 @@ static int32_t aq_read_raw_humidity(bme680_intf *b_intf)
 	uint32_t rst = 0;
 	uint8_t d[] = {0x00, 0x00};
 
-	if (b_intf == NULL || b_intf->bme_dev == NULL) {
+	if (b_intf == NULL) {
 		return -13;
 	}
 
