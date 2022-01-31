@@ -32,6 +32,8 @@ static void init_info_led();
 
 static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b);
 
+static int32_t aq_read_raw_humidity(bme680_intf *b_intf);
+
 void air_quality_handle_error(int16_t err)
 {
 	printf("There was an error %d\n", err);
@@ -147,6 +149,31 @@ static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b)
 	/* Note: this function will block if pio buffer is full */
 }
 
+static int32_t aq_read_raw_humidity(bme680_intf *b_intf)
+{
+	const uint8_t st_addr = 0x25;
+	const uint8_t len = 2;
+	int32_t ret;
+	uint32_t rst = 0;
+	uint8_t d[] = {0x00, 0x00};
+
+	if (b_intf == NULL || b_intf->bme_dev == NULL) {
+		return -13;
+	}
+
+	ret = bme68x_get_regs(st_addr, d, len, &b_intf->bme_dev);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	for (uint8_t i = 0; i < len; i++) {
+		rst = rst | ((uint32_t) d[i] << i * 8);
+	}
+
+	return (int32_t) rst;
+}
+
 int main() {
 	bme680_intf b_intf;
 	bme680_run_mode m = FORCED_MODE;
@@ -230,6 +257,9 @@ int main() {
 		ret = sample_bme680_sensor(m, &b_intf, &d);
 		readtime = get_absolute_time();
 		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
+
+		int32_t rawhum = aq_read_raw_humidity(&b_intf);
+		printf("{\"Raw Humidity\": %d}\n", rawhum);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
 			continue;
