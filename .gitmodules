@@ -1,3 +1,6 @@
 [submodule "BME68x-Sensor-API"]
 	path = BME68x-Sensor-API
 	url = https://github.com/BoschSensortec/BME68x-Sensor-API.git
+[submodule "BME280_driver"]
+	path = BME280_driver
+	url = https://github.com/BoschSensortec/BME280_driver.git

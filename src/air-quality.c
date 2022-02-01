@@ -1,4 +1,5 @@
 #include "bme680-interface.h"
+#include "bme280-interface.h"
 #include "ws2812.pio.h"
 
 #include <stdint.h>
@@ -51,19 +52,19 @@ void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 	       "{\"name\": \"temperature\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"degC\", "
-	       "\"timemillis\": %d},"
+	       "\"timemillis\": %u},"
 	       "{\"name\": \"pressure\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"Pa\", "
-	       "\"timemillis\": %d},"
+	       "\"timemillis\": %u},"
 	       "{\"name\": \"humidity\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"Percent\", "
-	       "\"timemillis\": %d},"
+	       "\"timemillis\": %u},"
 	       "{\"name\": \"gas resistance\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"ul\", "
-	       "\"timemillis\": %d}],"
+	       "\"timemillis\": %u}],"
 	       "\"status\": {"
 	       "\"sensor\": \"0x%x\"}}\n",
 	       d->temperature, millis,
@@ -174,6 +175,100 @@ static int32_t aq_read_raw_humidity(bme680_intf *b_intf)
 	return (int32_t) rst;
 }
 
+static int8_t aq_bme280_init(bme280_intf *b_intf)
+{
+	int8_t rslt;
+
+	/* Set up device interface */
+	b_intf->addr = BME280_I2C_ADDR_PRIM;
+	b_intf->dev.intf_ptr = (void*) b_intf;
+	b_intf->dev.intf = BME280_I2C_INTF;
+	b_intf->dev.read = user_i2c_read;
+	b_intf->dev.write = user_i2c_write;
+	b_intf->dev.delay_us = user_delay_us;
+
+	rslt = bme280_init(&b_intf->dev);
+
+	if (rslt != BME280_OK) {
+		return -3;
+	}
+
+	return 0;
+}
+
+static int8_t aq_bme280_configure(bme280_intf *b_intf,
+				  bme280_op_mode mode)
+{
+	int8_t rslt;
+	uint8_t settings_sel;
+
+	/* Configure oversampling */
+	b_intf->dev.settings.osr_h = BME280_OVERSAMPLING_1X;
+	b_intf->dev.settings.osr_p = BME280_OVERSAMPLING_16X;
+	b_intf->dev.settings.osr_t = BME280_OVERSAMPLING_2X;
+	b_intf->dev.settings.filter = BME280_FILTER_COEFF_16;
+
+	switch (mode) {
+	case BME280_IFACE_NORMAL_MODE:
+		b_intf->dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
+
+		settings_sel = BME280_OSR_PRESS_SEL;
+		settings_sel |= BME280_OSR_TEMP_SEL;
+		settings_sel |= BME280_OSR_HUM_SEL;
+		settings_sel |= BME280_STANDBY_SEL;
+		settings_sel |= BME280_FILTER_SEL;
+
+		rslt = bme280_set_sensor_settings(settings_sel, &b_intf->dev);
+
+		if (rslt != BME280_OK) {
+			return -3;
+		}
+
+		rslt = bme280_set_sensor_mode(BME280_NORMAL_MODE, &b_intf->dev);
+
+		if (rslt != BME280_OK) {
+			return -3;
+		}
+
+		break;
+
+	case BME280_IFACE_FORCED_MODE:
+		break;
+
+	default:
+		break;
+	}
+
+	return 0;
+}
+
+int8_t aq_bme280_sample(bme280_intf *b_intf)
+{
+	int8_t rslt;
+
+	rslt = bme280_get_sensor_data(BME280_ALL, &b_intf->data,
+				      &b_intf->dev);
+
+	if (rslt != BME280_OK) {
+		return -3;
+	}
+
+	return 0;
+}
+
+void aq_bme280_print_data(bme280_intf *b_intf)
+{
+	struct bme280_data *d = &b_intf->data;
+
+	printf("{\"sensor\": \"BME280\", "
+	       "\"data\": {"
+	       "\"temp\": %0.2f, "
+	       "\"pres\": %0.2f, "
+	       "\"hum\": %0.2f}}\n",
+	       d->temperature, d->pressure,
+	       d->humidity);
+}
+
 int main() {
 	bme680_intf b_intf;
 	bme680_run_mode m = FORCED_MODE;
@@ -182,6 +277,8 @@ int main() {
 	air_quality_led_config led_conf;
 	const uint16_t sample_delay_ms = 10000;
 	absolute_time_t next_sample_time;
+
+	bme280_intf b280_intf;
 
 	stdio_init_all();
 
@@ -211,7 +308,7 @@ int main() {
 	/* Option to compile in a selft test of sensor at start of
 	 * MCU */
 	printf("Beginning BME680 Selftest...Standby...\n");
-	ret = selftest_bme680_sensor(&b_intf, BME68X_I2C_ADDR_HIGH);
+	ret = selftest_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW);
 
 	if (ret == BME68X_OK) {
 		printf("BME680 Selftest SUCCESS...Continuing...\n");
@@ -230,7 +327,7 @@ int main() {
 	/* Keep trying to connect to sensor until there is a
 	 * success */
 	for (;;) {
-		ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_HIGH, m);
+		ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
 
 		if (ret >= 0) {
 			break;
@@ -239,6 +336,10 @@ int main() {
 		air_quality_handle_error(ret);
 		sleep_ms(1000);
 	}
+
+	/* Start BME280 */
+	aq_bme280_init(&b280_intf);
+	aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
 
 	air_quality_status_led_init(&led_conf, 2000);
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
@@ -255,11 +356,9 @@ int main() {
 		}
 
 		ret = sample_bme680_sensor(m, &b_intf, &d);
+		aq_bme280_sample(&b280_intf);
 		readtime = get_absolute_time();
 		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
-
-		int32_t rawhum = aq_read_raw_humidity(&b_intf);
-		printf("{\"Raw Humidity\": %d}\n", rawhum);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
 			continue;
@@ -271,6 +370,7 @@ int main() {
 		}
 
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
+		aq_bme280_print_data(&b280_intf);
 	}
 
 	/* Deinit i2c if loop broke */

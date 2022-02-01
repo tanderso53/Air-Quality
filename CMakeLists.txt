@@ -10,7 +10,10 @@ set(PICO_TOOLCHAIN_PATH $ENV{PICO_TOOLCHAIN_PATH})
 project(air-quality)
 pico_sdk_init()
 
-# Add in vendor library for BME680/BME688
+###########################################
+# Add in vendor library for BME680/BME688 #
+###########################################
+
 add_library(bme68x-sensor-api INTERFACE)
 
 target_sources(bme68x-sensor-api INTERFACE
@@ -19,6 +22,22 @@ target_sources(bme68x-sensor-api INTERFACE
 target_include_directories(bme68x-sensor-api INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/BME68x-Sensor-API)
 
+#############################
+# BME280 Vendor API Library #
+#############################
+
+add_library(bme280-driver INTERFACE)
+
+target_sources(bme280-driver INTERFACE
+  ${CMAKE_CURRENT_LIST_DIR}/BME280_driver/bme280.c)
+
+target_include_directories(bme280-driver INTERFACE
+  ${CMAKE_CURRENT_LIST_DIR}/BME280_driver)
+
+################################
+# Main air-quality MCU program #
+################################
+
 add_executable(air-quality)
 
 pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
@@ -26,6 +45,7 @@ pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 target_sources(air-quality PRIVATE
   src/air-quality.c
   src/bme680-interface.c
+  src/bme280-interface.c
   src/ws2812.pio
   )
 
@@ -33,7 +53,7 @@ pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
-  bme68x-sensor-api)
+  bme68x-sensor-api bme280-driver)
 
 #add_compile_definitions(BME680_INTERFACE_SELFTEST=1
 #	AIR_QUALITY_WAIT_CONNECTION=1)
