@@ -56,6 +56,6 @@ target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
   bme68x-sensor-api bme280-driver)
 
 #add_compile_definitions(BME680_INTERFACE_SELFTEST=1
-#	AIR_QUALITY_WAIT_CONNECTION=1)
+#  AIR_QUALITY_WAIT_CONNECTION=1)
 
 pico_add_extra_outputs(air-quality)

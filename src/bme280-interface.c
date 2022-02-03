@@ -60,7 +60,7 @@ int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, v
 {
     int8_t rslt = 0; /* Return 0 for Success, non-zero for failure */
     bme280_intf *intf = (bme280_intf*) intf_ptr;
-    uint8_t d[len + 1];
+    uint8_t d[len * 2]; /* Write reg address with each byte */
 
     /*
      * The parameter intf_ptr can be used as a variable to store the I2C address of the device
@@ -83,11 +83,16 @@ int8_t user_i2c_write(uint8_t reg_addr, const uint8_t *reg_data, uint32_t len, v
     d[0] = reg_addr;
 
     for (uint8_t i = 0; i < len; i++) {
-	    d[i + 1] = reg_data[i];
+	    d[i * 2] = reg_addr + i;
+	    d[i * 2 + 1] = reg_data[i];
     }
 
-    rslt = i2c_write_blocking(i2c_default, intf->addr, d, len + 1,
+    rslt = i2c_write_blocking(i2c_default, intf->addr, d, len * 2,
 			      false);
 
-    return rslt;
+    if (rslt == PICO_ERROR_GENERIC) {
+	    return rslt;
+    }
+
+    return 0;
 }

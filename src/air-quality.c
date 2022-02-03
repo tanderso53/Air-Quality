@@ -1,9 +1,11 @@
 #include "bme680-interface.h"
 #include "bme280-interface.h"
+#include "bme280-interface-error.h"
 #include "ws2812.pio.h"
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "pico/stdlib.h"
 
@@ -13,6 +15,14 @@
 
 #ifndef AIR_QUALITY_INFO_LED_PIN
 #define AIR_QUALITY_INFO_LED_PIN 16
+#endif
+
+#ifndef PICO_BOARD
+#define PICO_BOARD "unknown"
+#endif
+
+#ifndef PICO_TARGET_NAME
+#define PICO_TARGET_NAME "unknown"
 #endif
 
 typedef struct {
@@ -48,29 +58,29 @@ void air_quality_handle_error(int16_t err)
 
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 {
-	printf("{\"data\": ["
-	       "{\"name\": \"temperature\", "
+	printf("{\"sensor\": \"BME680\", \"data\": [");
+	printf("{\"name\": \"temperature\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"degC\", "
-	       "\"timemillis\": %u},"
-	       "{\"name\": \"pressure\", "
+	       "\"timemillis\": %lu}, ", d->temperature,
+	       (unsigned long) millis);
+	printf("{\"name\": \"pressure\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"Pa\", "
-	       "\"timemillis\": %u},"
-	       "{\"name\": \"humidity\", "
+	       "\"timemillis\": %lu}, ", d->pressure,
+	       (unsigned long) millis);
+	printf("{\"name\": \"humidity\", "
 	       "\"value\": %.2f, "
-	       "\"unit\": \"Percent\", "
-	       "\"timemillis\": %u},"
-	       "{\"name\": \"gas resistance\", "
+	       "\"unit\": \"%%\", "
+	       "\"timemillis\": %lu}, ", d->humidity,
+	       (unsigned long) millis);
+	printf("{\"name\": \"gas resistance\", "
 	       "\"value\": %.2f, "
 	       "\"unit\": \"ul\", "
-	       "\"timemillis\": %u}],"
-	       "\"status\": {"
-	       "\"sensor\": \"0x%x\"}}\n",
-	       d->temperature, millis,
-	       d->pressure, millis,
-	       d->humidity, millis,
-	       d->gas_resistance, millis,
+	       "\"timemillis\": %lu}], ", 
+	       d->gas_resistance, (unsigned long) millis);
+	printf("\"status\": {"
+	       "\"sensor\": \"%#x\"}}",
 	       d->status);
 }
 
@@ -180,7 +190,7 @@ static int8_t aq_bme280_init(bme280_intf *b_intf)
 	int8_t rslt;
 
 	/* Set up device interface */
-	b_intf->addr = BME280_I2C_ADDR_PRIM;
+	b_intf->addr = BME280_I2C_ADDR_SEC;
 	b_intf->dev.intf_ptr = (void*) b_intf;
 	b_intf->dev.intf = BME280_I2C_INTF;
 	b_intf->dev.read = user_i2c_read;
@@ -190,7 +200,7 @@ static int8_t aq_bme280_init(bme280_intf *b_intf)
 	rslt = bme280_init(&b_intf->dev);
 
 	if (rslt != BME280_OK) {
-		return -3;
+		return rslt;
 	}
 
 	return 0;
@@ -221,13 +231,13 @@ static int8_t aq_bme280_configure(bme280_intf *b_intf,
 		rslt = bme280_set_sensor_settings(settings_sel, &b_intf->dev);
 
 		if (rslt != BME280_OK) {
-			return -3;
+			return rslt;
 		}
 
 		rslt = bme280_set_sensor_mode(BME280_NORMAL_MODE, &b_intf->dev);
 
 		if (rslt != BME280_OK) {
-			return -3;
+			return rslt;
 		}
 
 		break;
@@ -256,17 +266,55 @@ int8_t aq_bme280_sample(bme280_intf *b_intf)
 	return 0;
 }
 
-void aq_bme280_print_data(bme280_intf *b_intf)
+void aq_bme280_print_data(bme280_intf *b_intf, unsigned long millis)
 {
 	struct bme280_data *d = &b_intf->data;
 
 	printf("{\"sensor\": \"BME280\", "
-	       "\"data\": {"
-	       "\"temp\": %0.2f, "
-	       "\"pres\": %0.2f, "
-	       "\"hum\": %0.2f}}\n",
-	       d->temperature, d->pressure,
-	       d->humidity);
+	       "\"data\": [");
+	printf("{\"name\": \"temperature\", "
+	       "\"value\": %0.2f, "
+	       "\"unit\": \"degC\", "
+	       "\"timemillis\": %lu}, ",
+	       d->temperature, millis);
+	printf("{\"name\": \"pressure\", "
+	       "\"value\": %0.2f, "
+	       "\"unit\": \"Pa\", "
+	       "\"timemillis\": %lu}, ",
+	       d->pressure, millis);
+	printf("{\"name\": \"humidity\", "
+	       "\"value\": %0.2f, "
+	       "\"unit\": \"%%\", "
+	       "\"timemillis\": %lu}]}",
+	       d->humidity, millis);
+}
+
+void aq_bme280_handle_error(int8_t i_errno)
+{
+	char level[16];
+	if (i_errno == BME280_OK) {
+		return;
+	}
+
+	switch (bme280_iface_err_level(i_errno)) {
+	case INFO:
+		strcpy(level, "INFO");
+		break;
+	case WARNING:
+		strcpy(level, "WARNING");
+		write_info_led_color(50, 50, 0);
+		break;
+	case ERROR:
+		strcpy(level, "ERROR");
+		write_info_led_color(50, 0, 0);
+		break;
+	default:
+		strcpy(level, "UNKNOWN");
+		break;
+	}
+
+	printf("%s: %s\n", level,
+	       bme280_iface_err_description(i_errno));
 }
 
 int main() {
@@ -281,6 +329,9 @@ int main() {
 	bme280_intf b280_intf;
 
 	stdio_init_all();
+
+	init_info_led();
+	write_info_led_color(0, 75, 0);
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
 	for (;;) {
@@ -297,8 +348,6 @@ int main() {
 	/* Turn on status LED */
 	air_quality_status_led_init(&led_conf, -1);
 	air_quality_status_led_on(&led_conf);
-	init_info_led();
-	write_info_led_color(0, 75, 0);
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -338,8 +387,11 @@ int main() {
 	}
 
 	/* Start BME280 */
-	aq_bme280_init(&b280_intf);
-	aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
+	ret = aq_bme280_init(&b280_intf);
+	aq_bme280_handle_error(ret);
+
+	ret = aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
+	aq_bme280_handle_error(ret);
 
 	air_quality_status_led_init(&led_conf, 2000);
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
@@ -356,7 +408,6 @@ int main() {
 		}
 
 		ret = sample_bme680_sensor(m, &b_intf, &d);
-		aq_bme280_sample(&b280_intf);
 		readtime = get_absolute_time();
 		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
 
@@ -369,8 +420,17 @@ int main() {
 			break;
 		}
 
+		ret = aq_bme280_sample(&b280_intf);
+		aq_bme280_handle_error(ret);
+
+		/* Print out all the data */
+		printf("{\"program\": \"%s\", \"board\": \"%s\", "
+		       "\"output\": [",
+		       PICO_TARGET_NAME, PICO_BOARD);
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
-		aq_bme280_print_data(&b280_intf);
+		printf(", ");
+		aq_bme280_print_data(&b280_intf, to_ms_since_boot(readtime));
+		printf("]}\n");
 	}
 
 	/* Deinit i2c if loop broke */
