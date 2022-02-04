@@ -38,6 +38,8 @@ target_include_directories(bme280-driver INTERFACE
 # Main air-quality MCU program #
 ################################
 
+include(${CMAKE_CURRENT_LIST_DIR}/pm2_5-interface.cmake)
+
 add_executable(air-quality)
 
 pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
@@ -53,7 +55,7 @@ pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
-  bme68x-sensor-api bme280-driver)
+  hardware_uart bme68x-sensor-api bme280-driver pm2_5-sensor-interface)
 
 #add_compile_definitions(BME680_INTERFACE_SELFTEST=1
 #  AIR_QUALITY_WAIT_CONNECTION=1)

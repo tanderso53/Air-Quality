@@ -1,6 +1,8 @@
 #include "bme680-interface.h"
 #include "bme280-interface.h"
 #include "bme280-interface-error.h"
+#include "pm2_5-interface.h"
+#include <pm2_5-error.h>
 #include "ws2812.pio.h"
 
 #include <stdint.h>
@@ -15,6 +17,18 @@
 
 #ifndef AIR_QUALITY_INFO_LED_PIN
 #define AIR_QUALITY_INFO_LED_PIN 16
+#endif
+
+#ifndef AIR_QUALITY_PM2_5_TX_PIN
+#define AIR_QUALITY_PM2_5_TX_PIN 0
+#endif
+
+#ifndef AIR_QUALITY_PM2_5_RX_PIN
+#define AIR_QUALITY_PM2_5_RX_PIN 1
+#endif
+
+#ifndef AIR_QUALITY_PM2_5_UART_PIN
+#define AIR_QUALITY_PM2_5_UART uart0
 #endif
 
 #ifndef PICO_BOARD
@@ -317,16 +331,72 @@ void aq_bme280_handle_error(int8_t i_errno)
 	       bme280_iface_err_description(i_errno));
 }
 
+void aq_pm2_5_print_data(pm2_5_data *d, unsigned long millis)
+{
+	printf("{\"sensor\": \"PMS 5003\", "
+	       "\"data\": [");
+	printf("{\"name\": \"PM1.0 Std\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"ug/m^3\", "
+	       "\"timemillis\": %lu}, ",
+	       d->pm1_0_std, millis);
+	printf("{\"name\": \"PM2.5 Std\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"ug/m^3\", "
+	       "\"timemillis\": %lu}, ",
+	       d->pm2_5_std, millis);
+	printf("{\"name\": \"pm10_std\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"ug/m^3\", "
+	       "\"timemillis\": %lu}]}",
+	       d->pm10_std, millis);
+}
+
+void aq_pm2_5_handle_error(int8_t i_errno)
+{
+	char level[16];
+	if (i_errno == BME280_OK) {
+		return;
+	}
+
+	switch (pm2_5_err_level(i_errno)) {
+	case PM2_5_INFO:
+		strcpy(level, "INFO");
+		break;
+	case PM2_5_WARNING:
+		strcpy(level, "WARNING");
+		write_info_led_color(50, 50, 0);
+		break;
+	case PM2_5_ERROR:
+		strcpy(level, "ERROR");
+		write_info_led_color(50, 0, 0);
+		break;
+	default:
+		strcpy(level, "UNKNOWN");
+		break;
+	}
+
+	printf("%s: %s\n", level,
+	       pm2_5_err_description(i_errno));
+}
+
 int main() {
-	bme680_intf b_intf;
-	bme680_run_mode m = FORCED_MODE;
-	struct bme68x_data d;
 	int8_t ret = 0;
+
+	/* Interfaces */
+	bme680_intf b_intf;
+	bme280_intf b280_intf;
+	pm2_5_intf p_intf;
+
+	/* Output Data Structures */
+	struct bme68x_data d;
+	pm2_5_data pdata;
+
+	/* Configuration Parameters */
+	bme680_run_mode m = FORCED_MODE;
 	air_quality_led_config led_conf;
 	const uint16_t sample_delay_ms = 10000;
 	absolute_time_t next_sample_time;
-
-	bme280_intf b280_intf;
 
 	stdio_init_all();
 
@@ -393,6 +463,16 @@ int main() {
 	ret = aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
 	aq_bme280_handle_error(ret);
 
+	/* Start PM2_5 Sensor */
+	p_intf.uart = AIR_QUALITY_PM2_5_UART;
+	ret = pm2_5_intf_init(&p_intf, AIR_QUALITY_PM2_5_TX_PIN,
+			      AIR_QUALITY_PM2_5_RX_PIN);
+	aq_pm2_5_handle_error(ret);
+
+	ret = pm2_5_set_mode(&p_intf.dev, PM2_5_MODE_PASSIVE);
+	aq_pm2_5_handle_error(ret);
+
+	/* Set status led */
 	air_quality_status_led_init(&led_conf, 2000);
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
 
@@ -423,6 +503,9 @@ int main() {
 		ret = aq_bme280_sample(&b280_intf);
 		aq_bme280_handle_error(ret);
 
+		ret = pm2_5_get_data(&p_intf.dev, &pdata);
+		aq_pm2_5_handle_error(ret);
+
 		/* Print out all the data */
 		printf("{\"program\": \"%s\", \"board\": \"%s\", "
 		       "\"output\": [",
@@ -430,12 +513,15 @@ int main() {
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
 		printf(", ");
 		aq_bme280_print_data(&b280_intf, to_ms_since_boot(readtime));
+		printf(", ");
+		aq_pm2_5_print_data(&pdata, readtime);
 		printf("]}\n");
 	}
 
 	/* Deinit i2c if loop broke */
 	deinit_bme680_sensor(&b_intf);
 	air_quality_status_led_off(&led_conf);
+	pm2_5_intf_deinit(&p_intf);
 
 	return 1;
 }
