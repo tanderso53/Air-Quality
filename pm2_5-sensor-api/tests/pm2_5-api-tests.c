@@ -276,7 +276,7 @@ int unit_pm2_5_get_data(int *testcnt, int *failcnt)
 	pm2_5_dev dev_success;
 	pm2_5_dev dev_failure;
 	pm2_5_data data_good;
-	pm2_5_data *data_null;
+	pm2_5_data *data_null = NULL;
 
 	/* Success */
 	dev_success.intf_ptr = &intf;
@@ -333,6 +333,8 @@ int unit_pm2_5_sleep(int *testcnt, int *failcnt)
 
 	PM2_5_TEST_FN(pm2_5_sleep_sleep_success,
 		      pm2_5_sleep(&dev_failure), PM2_5_E_COMM_FAILURE);
+
+	dev_failure.sleep = 1;
 
 	PM2_5_TEST_FN(pm2_5_sleep_wakeup_failure,
 		      pm2_5_wake(&dev_failure), PM2_5_E_COMM_FAILURE);

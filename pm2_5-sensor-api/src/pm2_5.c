@@ -109,7 +109,7 @@ int8_t pm2_5_set_mode(pm2_5_dev *dev, uint8_t mode)
 	rst = dev->send_cb(cmd, sizeof(cmd), dev->intf_ptr);
 
 	if (rst != PM2_5_OK) {
-		return rst;
+		return PM2_5_E_COMM_FAILURE;
 	}
 
 	/* The mode stored in object is only updated if successful */
@@ -187,7 +187,7 @@ int8_t pm2_5_get_data(pm2_5_dev *dev, pm2_5_data *data)
 	}
 
 	/* Parse the received data into the given data object */
-	rst = _parse_data(rsp, sizeof(data), data);
+	rst = _parse_data(rsp, PM2_5_RX_DATA_LEN_BYTES, data);
 
 	if (rst != PM2_5_OK) {
 		return rst;
@@ -295,7 +295,7 @@ static uint8_t _check_checksum(const uint8_t *rawdata)
 	uint16_t chk;
 	uint16_t sum = 0;
 
-	chk = _parse_uint(rawdata[len - 3], rawdata[len - 2]);
+	chk = _parse_uint(rawdata[len - 2], rawdata[len - 1]);
 
 	for (uint8_t i = 0; i < len - 2; i++) {
 		sum += rawdata[i];
