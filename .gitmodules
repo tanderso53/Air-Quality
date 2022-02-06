@@ -4,3 +4,6 @@
 [submodule "BME280_driver"]
 	path = BME280_driver
 	url = https://github.com/BoschSensortec/BME280_driver.git
+[submodule "pm2_5-sensor-api"]
+	path = pm2_5-sensor-api
+	url = https://www.thecrib.dev/driver-development/pm2_5-sensor-api.git
