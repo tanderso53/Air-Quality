@@ -65,7 +65,33 @@
 #define PICO_TARGET_NAME "unknown"
 #endif
 
+/* Useful local macros */
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
+
+#ifdef AIR_QUALITY_LOG_DEBUG
+
+#define DEBUGMSG(msg) do {				\
+		printf("DEBUG: L%u " msg "\n",		\
+		       (unsigned int) __LINE__);	\
+	} while (0);
+
+#define DEBUGDATA(msg, data, type) do {			\
+		printf("DEBUG: L%u " msg " " type "\n",	\
+		       (unsigned int) __LINE__, data);	\
+	} while (0);
+
+#else
+
+#define DEBUGMSG(msg)
+#define DEBUGDATA(msg, data, type)
+
+#endif /* #ifdef AIR_QUALITY_DEBUG */
+
+/*
+**********************************************************************
+******************** PROGRAM DEFINITIONS *****************************
+**********************************************************************
+*/
 
 typedef struct {
 	absolute_time_t lastblink;
@@ -454,6 +480,8 @@ int init_wifi_module()
 	const unsigned int rxlen = 64;
 	char rxbuf[rxlen];
 
+	DEBUGMSG("Initializing WiFi");
+
 	/* Set up TX */
 	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_tx_program);
 
@@ -474,11 +502,15 @@ int init_wifi_module()
 
 int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
 {
+	DEBUGDATA("Sending AT command", cmd, "%s");
+
 	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
 			     cmd);
 
 	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
 			     "\r\n");
+
+	DEBUGMSG("Checking AT response");
 
 	for (unsigned int i = 0; i < len - 1; i++) {
 
@@ -487,25 +519,39 @@ int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
 		c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
 					 AIR_QUALITY_WIFI_RX_SM);
 
+		DEBUGDATA("Received char", (unsigned int) c, "%u");
+
 		rsp[i] = c;
 
-		if (c == '\n' && memcmp(&rsp[i - 2], "OK", sizeof(char) * 2) == 0) {
-			if (i + 1 < len) {
-				rsp[i + 1] = '\0';
+		if (i > 0 && rsp[i - 1] == '\r' && rsp[i] == '\n') {
+			DEBUGMSG("Found AT end sequence");
+			if (memcmp(&rsp[i - 3], "OK", sizeof(char) * 2) == 0) {
+				if (i + 1 < len) {
+					rsp[i + 1] = '\0';
+				}
+
+				DEBUGDATA("Received AT response OK for command",
+					  cmd, "%s");
+
+				return 0;
 			}
 
-			return 0;
-		}
+			if (memcmp(&rsp[i - 6], "ERROR", sizeof(char) * 5) == 0) {
 
-		if (c == '\n' && memcmp(&rsp[i - 5], "ERROR", sizeof(char) * 5) == 0) {
+				if (i + 1 < len) {
+					rsp[i + 1] = '\0';
+				}
 
-			if (i + 1 < len) {
-				rsp[i + 1] = '\0';
-			}
+				DEBUGDATA("Received AT response ERROR for command",
+					  cmd, "%s");
 			
-			return -1;
+				return -1;
+			}
 		}
 	}
+
+	DEBUGDATA("Received no AT response before buffer filled command",
+		  cmd, "%s");
 
 	return len;
 }
