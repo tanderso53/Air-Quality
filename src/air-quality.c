@@ -623,8 +623,11 @@ void wifi_passthrough()
 
 			break;
 		case 127: /* Backspace */
-			printf("\b");
-			--i;
+			/* Only backspace if buffer isn't empty */
+			if (i > 0) {
+				printf("\b");
+				--i;
+			}
 
 			break;
 		default:
