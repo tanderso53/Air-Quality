@@ -49,6 +49,11 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 		return PM2_5_E_NULL_PTR;
 	}
 
+	/* Check uart pointer */
+	if (intf->uart != uart1 && intf->uart != uart0) {
+		return PM2_5_E_NULL_PTR;
+	}
+
 	/* Initialize the uart interface */
 	uart_init(intf->uart, PM2_5_DEFAULT_BAUD);
 	uart_set_format(intf->uart, 8, PM2_5_STOP_BIT,
@@ -57,6 +62,12 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	/* Set GPIO function */
 	gpio_set_function(tx, GPIO_FUNC_UART);
 	gpio_set_function(rx, GPIO_FUNC_UART);
+
+	/* Set the callbacks */
+	intf->dev.send_cb = pm2_5_user_send;
+	intf->dev.receive_cb = pm2_5_user_receive;
+	intf->dev.available_cb = pm2_5_user_available;
+	intf->dev.intf_ptr = intf;
 
 	rst = pm2_5_init(&intf->dev);
 
@@ -91,7 +102,7 @@ int8_t pm2_5_user_send(const uint8_t *data, uint8_t len,
 	}
 
 	/* Checks if TX FIFO has space to write */
-	if (uart_is_writable(i_ptr->uart)) {
+	if (!uart_is_writable(i_ptr->uart)) {
 		return -1;
 	}
 
@@ -110,7 +121,15 @@ int8_t pm2_5_user_receive(uint8_t *data,
 		return -1;
 	}
 
-	uart_read_blocking(i_ptr->uart, data, len);
+	/* Time-out if no data found within timeout period */
+	for (uint8_t i = 0; i < len; i++) {
+
+		if (uart_is_readable_within_us(i_ptr->uart, PM2_5_INTERFACE_TIMEOUT_US)) {
+			uart_read_blocking(i_ptr->uart, &data[i], 1);
+		} else {
+			return -1;
+		}
+	}
 
 	return 0;
 }

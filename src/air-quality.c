@@ -4,6 +4,8 @@
 #include "pm2_5-interface.h"
 #include <pm2_5-error.h>
 #include "ws2812.pio.h"
+#include "uart_tx.pio.h"
+#include "uart_rx.pio.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -20,15 +22,39 @@
 #endif
 
 #ifndef AIR_QUALITY_PM2_5_TX_PIN
-#define AIR_QUALITY_PM2_5_TX_PIN 0
+#define AIR_QUALITY_PM2_5_TX_PIN 8
 #endif
 
 #ifndef AIR_QUALITY_PM2_5_RX_PIN
-#define AIR_QUALITY_PM2_5_RX_PIN 1
+#define AIR_QUALITY_PM2_5_RX_PIN 9
 #endif
 
-#ifndef AIR_QUALITY_PM2_5_UART_PIN
-#define AIR_QUALITY_PM2_5_UART uart0
+#ifndef AIR_QUALITY_PM2_5_UART
+#define AIR_QUALITY_PM2_5_UART uart1
+#endif
+
+#ifndef AIR_QUALITY_WIFI_TX_PIN
+#define AIR_QUALITY_WIFI_TX_PIN 10
+#endif
+
+#ifndef AIR_QUALITY_WIFI_RX_PIN
+#define AIR_QUALITY_WIFI_RX_PIN 11
+#endif
+
+#ifndef AIR_QUALITY_WIFI_PIO
+#define AIR_QUALITY_WIFI_PIO pio1
+#endif
+
+#ifndef AIR_QUALITY_WIFI_BAUD
+#define AIR_QUALITY_WIFI_BAUD 115200
+#endif
+
+#ifndef AIR_QUALITY_WIFI_TX_SM
+#define AIR_QUALITY_WIFI_TX_SM 0
+#endif
+
+#ifndef AIR_QUALITY_WIFI_RX_SM
+#define AIR_QUALITY_WIFI_RX_SM 1
 #endif
 
 #ifndef PICO_BOARD
@@ -38,6 +64,8 @@
 #ifndef PICO_TARGET_NAME
 #define PICO_TARGET_NAME "unknown"
 #endif
+
+#define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
 typedef struct {
 	absolute_time_t lastblink;
@@ -58,6 +86,10 @@ static void init_info_led();
 static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b);
 
 static int32_t aq_read_raw_humidity(bme680_intf *b_intf);
+
+static int init_wifi_module();
+
+int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len);
 
 void air_quality_handle_error(int16_t err)
 {
@@ -331,7 +363,8 @@ void aq_bme280_handle_error(int8_t i_errno)
 	       bme280_iface_err_description(i_errno));
 }
 
-void aq_pm2_5_print_data(pm2_5_data *d, unsigned long millis)
+void aq_pm2_5_print_data(pm2_5_dev *dev, pm2_5_data *d,
+			 unsigned long millis)
 {
 	printf("{\"sensor\": \"PMS 5003\", "
 	       "\"data\": [");
@@ -348,8 +381,43 @@ void aq_pm2_5_print_data(pm2_5_data *d, unsigned long millis)
 	printf("{\"name\": \"pm10_std\", "
 	       "\"value\": %u, "
 	       "\"unit\": \"ug/m^3\", "
-	       "\"timemillis\": %lu}]}",
+	       "\"timemillis\": %lu}, ",
 	       d->pm10_std, millis);
+	printf("{\"name\": \"NP > 0.3um\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}, ",
+	       d->np_0_3, millis);
+	printf("{\"name\": \"NP > 0.5um\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}, ",
+	       d->np_0_5, millis);
+	printf("{\"name\": \"NP > 1.0um\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}, ",
+	       d->np_1_0, millis);
+	printf("{\"name\": \"NP > 2.5um\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}, ",
+	       d->np_2_5, millis);
+	printf("{\"name\": \"NP > 5.0\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}, ",
+	       d->np_5_0, millis);
+	printf("{\"name\": \"NP > 10\", "
+	       "\"value\": %u, "
+	       "\"unit\": \"num/0.1L air\", "
+	       "\"timemillis\": %lu}], ",
+	       d->np_10, millis);
+	printf("\"status\": {"
+	       "\"opmode\": \"%s\", "
+	       "\"sleep\": %s}}",
+	       dev->mode == PM2_5_MODE_ACTIVE ? "ACTIVE" : "PASSIVE",
+	       dev->sleep ? "true" : "false");
 }
 
 void aq_pm2_5_handle_error(int8_t i_errno)
@@ -380,6 +448,68 @@ void aq_pm2_5_handle_error(int8_t i_errno)
 	       pm2_5_err_description(i_errno));
 }
 
+int init_wifi_module()
+{
+	uint offset;
+	const unsigned int rxlen = 64;
+	char rxbuf[rxlen];
+
+	/* Set up TX */
+	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_tx_program);
+
+	uart_tx_program_init(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
+			     offset, AIR_QUALITY_WIFI_TX_PIN,
+			     AIR_QUALITY_WIFI_BAUD);
+
+	/* Set up RX */
+	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_rx_program);
+
+	uart_rx_program_init(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_RX_SM,
+			     offset, AIR_QUALITY_WIFI_RX_PIN,
+			     AIR_QUALITY_WIFI_BAUD);
+
+	/* Check connection */
+	return send_wifi_cmd("AT", rxbuf, rxlen);
+}
+
+int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
+{
+	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
+			     cmd);
+
+	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
+			     "\r\n");
+
+	for (unsigned int i = 0; i < len - 1; i++) {
+
+		char c;
+
+		c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
+					 AIR_QUALITY_WIFI_RX_SM);
+
+		rsp[i] = c;
+
+		if (c == '\n' && memcmp(&rsp[i - 2], "OK", sizeof(char) * 2) == 0) {
+			if (i + 1 < len) {
+				rsp[i + 1] = '\0';
+			}
+
+			return 0;
+		}
+
+		if (c == '\n' && memcmp(&rsp[i - 5], "ERROR", sizeof(char) * 5) == 0) {
+
+			if (i + 1 < len) {
+				rsp[i + 1] = '\0';
+			}
+			
+			return -1;
+		}
+	}
+
+	return len;
+}
+
 int main() {
 	int8_t ret = 0;
 
@@ -398,7 +528,7 @@ int main() {
 	const uint16_t sample_delay_ms = 10000;
 	absolute_time_t next_sample_time;
 
-	stdio_init_all();
+	stdio_usb_init();
 
 	init_info_led();
 	write_info_led_color(0, 75, 0);
@@ -406,8 +536,11 @@ int main() {
 #ifdef AIR_QUALITY_WAIT_CONNECTION
 	for (;;) {
 
+		write_info_led_color(0, 0, 25);
+
 		if (stdio_usb_connected()) {
 			printf("Welcome! You are connected!\n");
+			write_info_led_color(0, 75, 0);
 			break;
 		}
 
@@ -417,7 +550,7 @@ int main() {
 
 	/* Turn on status LED */
 	air_quality_status_led_init(&led_conf, -1);
-	air_quality_status_led_on(&led_conf);
+	/*air_quality_status_led_on(&led_conf);*/
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -442,6 +575,23 @@ int main() {
 		return 1;
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */
+
+	/* Initialize WiFi Module */
+	if (init_wifi_module() < 0) {
+		printf("ERROR: Failed to intitialize WiFi module\n");
+	} else {
+		char rsp[256];
+
+		/* If connected successfully print WiFi settings */
+		send_wifi_cmd("AT+CWMODE?", rsp, ARRAY_LEN(rsp));
+		printf("%s", rsp);
+
+		send_wifi_cmd("AT+CWCOUNTRY?", rsp, ARRAY_LEN(rsp));
+		printf("%s", rsp);
+
+		send_wifi_cmd("AT+CWLAP", rsp, ARRAY_LEN(rsp));
+		printf("%s", rsp);
+	}
 
 	/* Keep trying to connect to sensor until there is a
 	 * success */
@@ -480,6 +630,7 @@ int main() {
 	 * successful. This loop will only break on error. */
 	for (;;) {
 		absolute_time_t readtime;
+		uint8_t print_pm = 0;
 
 		air_quality_status_led_on(&led_conf);
 
@@ -505,6 +656,7 @@ int main() {
 
 		ret = pm2_5_get_data(&p_intf.dev, &pdata);
 		aq_pm2_5_handle_error(ret);
+		print_pm = ret == 0 ? 1 : 0;
 
 		/* Print out all the data */
 		printf("{\"program\": \"%s\", \"board\": \"%s\", "
@@ -513,8 +665,12 @@ int main() {
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
 		printf(", ");
 		aq_bme280_print_data(&b280_intf, to_ms_since_boot(readtime));
-		printf(", ");
-		aq_pm2_5_print_data(&pdata, readtime);
+
+		if (print_pm) {
+			printf(", ");
+			aq_pm2_5_print_data(&p_intf.dev, &pdata, readtime);
+		}
+
 		printf("]}\n");
 	}
 
