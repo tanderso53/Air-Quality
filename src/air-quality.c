@@ -13,6 +13,8 @@
 
 #include "pico/stdlib.h"
 
+/* #define AIR_QUALITY_LOG_DEBUG 1 */
+
 #ifndef AIR_QUALITY_STATUS_LED
 #define AIR_QUALITY_STATUS_LED 13
 #endif
@@ -556,6 +558,88 @@ int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
 	return len;
 }
 
+void wifi_passthrough()
+{
+	char cmd[128];
+	size_t i = 0;
+	const char *prompt = "Prompt> ";
+
+	printf("Initializing ESP-AT Command Passthrough...\n" "%s",
+	       prompt);
+
+	for (;;) {
+		char c;
+		int rst;
+
+		rst = getchar_timeout_us(30000);
+
+		/* Ignore timeouts */
+		if (rst == PICO_ERROR_TIMEOUT)
+			continue;
+
+		c = (char) rst;
+
+		DEBUGDATA("Received char", c, "%c");
+
+		switch (c) {
+		case '\n':
+		case '\r':
+			cmd[i] = '\0';
+			printf("\n");
+
+			/* User can break loop if desired */
+			if (strcmp(cmd, "exit") == 0) {
+				return;
+			}
+
+			/* Provide a help message */
+			if (strcmp(cmd, "help") == 0) {
+				printf("Help comes to those who ask for"
+				       " it.\n"
+				       "All commands are passed to WiFi"
+				       " co-MCU, except the following\n\n"
+				       "Commands:\n"
+				       "exit	Break loop and run main program\n"
+				       "help	Print this message\n");
+			} else if (strlen(cmd) == 0) {
+				/* Index to zero, string to empty */
+				i = 0;
+				cmd[0] = '\0';
+				printf("%s", prompt);
+
+				break;
+			} else {
+				char rsp[258];
+
+				/* Send command to ESP module */
+				send_wifi_cmd(cmd, rsp, ARRAY_LEN(rsp));
+				printf("%s", rsp);
+			}
+
+			/* Index to zero, string to empty */
+			i = 0;
+			cmd[0] = '\0';
+			printf("%s", prompt);
+
+			break;
+		case 127: /* Backspace */
+			printf("\b");
+			--i;
+
+			break;
+		default:
+			cmd[i] = c;
+
+			/* Echo character */
+			printf("%c", c);
+
+			++i;
+
+			break;
+		}
+	}
+}
+
 int main() {
 	int8_t ret = 0;
 
@@ -637,6 +721,8 @@ int main() {
 
 		send_wifi_cmd("AT+CWLAP", rsp, ARRAY_LEN(rsp));
 		printf("%s", rsp);
+
+		wifi_passthrough();
 	}
 
 	/* Keep trying to connect to sensor until there is a
