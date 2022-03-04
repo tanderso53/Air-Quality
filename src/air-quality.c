@@ -925,7 +925,7 @@ int main() {
 		print_pm = ret == 0 ? 1 : 0;
 
 		/* Print out all the data */
-		char s[64];
+		char s[256];
 
 		snprintf(s, ARRAY_LEN(s),
 			 "{\"program\": \"%s\", \"board\": \"%s\", "
