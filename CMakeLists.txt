@@ -60,6 +60,7 @@ target_sources(air-quality PRIVATE
   src/air-quality.c
   src/bme680-interface.c
   src/bme280-interface.c
+  src/esp-at-modem.c
   src/ws2812.pio
   src/uart_tx.pio
   src/uart_rx.pio
