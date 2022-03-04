@@ -69,7 +69,8 @@ pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
-  hardware_uart bme68x-sensor-api bme280-driver pm2_5-sensor-interface)
+  hardware_uart bme68x-sensor-api bme280-driver pm2_5-sensor-interface
+  hardware_adc)
 
 if(AIR_QUALITY_SELF_TEST)
 

@@ -12,8 +12,7 @@
 #include <string.h>
 
 #include "pico/stdlib.h"
-
-/* #define AIR_QUALITY_LOG_DEBUG 1 */
+#include "hardware/adc.h"
 
 #ifndef AIR_QUALITY_STATUS_LED
 #define AIR_QUALITY_STATUS_LED 13
@@ -57,6 +56,14 @@
 
 #ifndef AIR_QUALITY_WIFI_RX_SM
 #define AIR_QUALITY_WIFI_RX_SM 1
+#endif
+
+#ifndef AIR_QUALITY_ADC_BATT_GPIO_PIN
+#define AIR_QUALITY_ADC_BATT_GPIO_PIN 28
+#endif
+
+#ifndef AIR_QUALITY_ADC_BATT_ADC_CH
+#define AIR_QUALITY_ADC_BATT_ADC_CH 2
 #endif
 
 #ifndef PICO_BOARD
@@ -129,11 +136,13 @@ int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len);
 static void aq_print(const char *s, size_t len);
 
 void aq_print(const char *s, size_t len)
-{	
+{
 	printf("%s", s);
 
-	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON)
+	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON) {
+		DEBUGDATA("Attempting to write WiFi", s, "%s");
 		wifi_send_string(s, len);
+	}
 }
 
 void air_quality_handle_error(int16_t err)
@@ -624,8 +633,6 @@ int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
 		c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
 					 AIR_QUALITY_WIFI_RX_SM);
 
-		DEBUGDATA("Received char", (unsigned int) c, "%u");
-
 		rsp[i] = c;
 
 		if (i > 0 && rsp[i - 1] == '\r' && rsp[i] == '\n') {
@@ -682,7 +689,7 @@ void wifi_passthrough()
 
 		c = (char) rst;
 
-		DEBUGDATA("Received char", c, "%c");
+		/* DEBUGDATA("Received char", c, "%c"); */
 
 		switch (c) {
 		case '\n':
@@ -750,7 +757,7 @@ int wifi_send_string(const char *s, size_t len)
 {
 	int ret;
 	char cmd[64];
-	char rsp[512];
+	char rsp[2048];
 
 	if (strnlen(s, len) == 0)
 		return 0;
@@ -760,10 +767,59 @@ int wifi_send_string(const char *s, size_t len)
 
 	ret = send_wifi_cmd(cmd, rsp, ARRAY_LEN(rsp));
 
+	DEBUGDATA("AT Send CMD", rsp, "%s");
+
 	if (ret < 0)
 		return ret;
 
-	return send_wifi_cmd(s, rsp, ARRAY_LEN(rsp));
+	ret = send_wifi_cmd(s, rsp, ARRAY_LEN(rsp));
+
+	DEBUGDATA("AT data response", rsp, "%s");
+
+	return ret;
+}
+
+void aq_adc_init()
+{
+	adc_init();
+
+	adc_gpio_init(AIR_QUALITY_ADC_BATT_GPIO_PIN);
+}
+
+double aq_batt_voltage()
+{
+	const double cf = 2 * 3.3d / (1 << 12);
+	adc_select_input(AIR_QUALITY_ADC_BATT_ADC_CH);
+
+	return cf * (double) adc_read();
+}
+
+void aq_print_batt()
+{
+	char printbuf[512];
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"sensor\": \"Board\", "
+		 "\"data\": [");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"V Batt\", "
+		 "\"value\": %0.2f, "
+		 "\"unit\": \"V\", "
+		 "\"timemillis\": %lu}], ",
+		 aq_batt_voltage(),
+		 to_ms_since_boot(get_absolute_time()));
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "\"status\": {"
+		 "\"charging\": \"%s\"}}",
+		 "unknown");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
 }
 
 int main() {
@@ -832,6 +888,9 @@ int main() {
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */
 
+	/* Initialize battery checker */
+	aq_adc_init();
+
 	/* Initialize WiFi Module */
 	if (init_wifi_module() < 0) {
 		printf("ERROR: Failed to intitialize WiFi module\n");
@@ -840,9 +899,6 @@ int main() {
 
 		/* If connected successfully print WiFi settings */
 		send_wifi_cmd("AT+CWMODE?", rsp, ARRAY_LEN(rsp));
-		printf("%s", rsp);
-
-		send_wifi_cmd("AT+CWLAP", rsp, ARRAY_LEN(rsp));
 		printf("%s", rsp);
 
 		/* Set up server */
@@ -933,6 +989,11 @@ int main() {
 			 PICO_TARGET_NAME, PICO_BOARD);
 		aq_print(s, ARRAY_LEN(s));
 
+		aq_print_batt();
+
+		snprintf(s, ARRAY_LEN(s), ", ");
+		aq_print(s, ARRAY_LEN(s));
+
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
 
 		snprintf(s, ARRAY_LEN(s), ", ");
@@ -944,7 +1005,8 @@ int main() {
 			snprintf(s, ARRAY_LEN(s), ", ");
 			aq_print(s, ARRAY_LEN(s));
 
-			aq_pm2_5_print_data(&p_intf.dev, &pdata, readtime);
+			aq_pm2_5_print_data(&p_intf.dev, &pdata,
+					    to_ms_since_boot(readtime));
 		}
 
 		snprintf(s, ARRAY_LEN(s) - 1, "]}\n");
