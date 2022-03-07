@@ -17,6 +17,9 @@ option(AIR_QUALITY_SELF_TEST "Perform self test sequence at start"
 option(AIR_QUALITY_WAIT "Wait on connection for application to begin"
   OFF)
 
+option(AIR_QUALITY_LOG_LEVEL_DEBUG "Enable debug messages to stdout"
+  OFF)
+
 ###########################################
 # Add in vendor library for BME680/BME688 #
 ###########################################
@@ -84,6 +87,14 @@ if(AIR_QUALITY_WAIT)
 
   target_compile_definitions(air-quality PRIVATE
     AIR_QUALITY_WAIT_CONNECTION=1)
+
+endif()
+
+# Produce debug messages during runtime
+if (AIR_QUALITY_LOG_LEVEL_DEBUG)
+
+  target_compile_definitions(air-quality PRIVATE
+    AIR_QUALITY_LOG_DEBUG=1)
 
 endif()
 
