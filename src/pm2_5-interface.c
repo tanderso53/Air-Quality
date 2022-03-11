@@ -41,6 +41,9 @@
 
 #include "pm2_5-interface.h"
 
+static void _pm2_5_fan_power_gpio_setup();
+static void _pm2_5_fan_power_set_enabled(bool en);
+
 int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 {
 	int8_t rst;
@@ -48,6 +51,15 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	if (!intf || !intf->uart) {
 		return PM2_5_E_NULL_PTR;
 	}
+
+	/* Check uart pointer */
+	if (intf->uart != uart1 && intf->uart != uart0) {
+		return PM2_5_E_NULL_PTR;
+	}
+
+	/* Enable fan power module */
+	_pm2_5_fan_power_gpio_setup();
+	_pm2_5_fan_power_set_enabled(true);
 
 	/* Initialize the uart interface */
 	uart_init(intf->uart, PM2_5_DEFAULT_BAUD);
@@ -57,6 +69,12 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	/* Set GPIO function */
 	gpio_set_function(tx, GPIO_FUNC_UART);
 	gpio_set_function(rx, GPIO_FUNC_UART);
+
+	/* Set the callbacks */
+	intf->dev.send_cb = pm2_5_user_send;
+	intf->dev.receive_cb = pm2_5_user_receive;
+	intf->dev.available_cb = pm2_5_user_available;
+	intf->dev.intf_ptr = intf;
 
 	rst = pm2_5_init(&intf->dev);
 
@@ -91,7 +109,7 @@ int8_t pm2_5_user_send(const uint8_t *data, uint8_t len,
 	}
 
 	/* Checks if TX FIFO has space to write */
-	if (uart_is_writable(i_ptr->uart)) {
+	if (!uart_is_writable(i_ptr->uart)) {
 		return -1;
 	}
 
@@ -110,7 +128,15 @@ int8_t pm2_5_user_receive(uint8_t *data,
 		return -1;
 	}
 
-	uart_read_blocking(i_ptr->uart, data, len);
+	/* Time-out if no data found within timeout period */
+	for (uint8_t i = 0; i < len; i++) {
+
+		if (uart_is_readable_within_us(i_ptr->uart, PM2_5_INTERFACE_TIMEOUT_US)) {
+			uart_read_blocking(i_ptr->uart, &data[i], 1);
+		} else {
+			return -1;
+		}
+	}
 
 	return 0;
 }
@@ -122,3 +148,24 @@ uint8_t pm2_5_user_available(void *intf_ptr)
 	return uart_is_readable(i_ptr->uart) ? 1 : 0;
 }
 
+void _pm2_5_fan_power_gpio_setup()
+{
+	const uint gpin = PM2_5_INTERFACE_GPIO_EN_PIN;
+
+	gpio_init(gpin);
+
+	/* Set GPIO settings */
+	gpio_set_dir(gpin, true);
+	gpio_disable_pulls(gpin);
+
+	/* Set GPIO low to start disabled */
+	gpio_put(gpin, false);
+}
+
+void _pm2_5_fan_power_set_enabled(bool en)
+{
+	const uint gpin = PM2_5_INTERFACE_GPIO_EN_PIN;
+
+	/* High enabled, low disabled */
+	gpio_put(gpin, en);
+}

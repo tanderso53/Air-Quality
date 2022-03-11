@@ -46,6 +46,14 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 
+#ifndef PM2_5_INTERFACE_TIMEOUT_US
+#define PM2_5_INTERFACE_TIMEOUT_US 500000
+#endif
+
+#ifndef PM2_5_INTERFACE_GPIO_EN_PIN
+#define PM2_5_INTERFACE_GPIO_EN_PIN 6
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* #ifdef __cplusplus */

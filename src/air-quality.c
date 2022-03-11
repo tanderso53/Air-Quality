@@ -3,16 +3,19 @@
 #include "bme280-interface-error.h"
 #include "pm2_5-interface.h"
 #include <pm2_5-error.h>
+#include "esp-at-modem.h"
 #include "ws2812.pio.h"
+#include "debugmsg.h"
 
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "pico/stdlib.h"
+#include "hardware/adc.h"
 
 #ifndef AIR_QUALITY_STATUS_LED
-#define AIR_QUALITY_STATUS_LED 13
+#define AIR_QUALITY_STATUS_LED 24
 #endif
 
 #ifndef AIR_QUALITY_INFO_LED_PIN
@@ -20,15 +23,23 @@
 #endif
 
 #ifndef AIR_QUALITY_PM2_5_TX_PIN
-#define AIR_QUALITY_PM2_5_TX_PIN 0
+#define AIR_QUALITY_PM2_5_TX_PIN 8
 #endif
 
 #ifndef AIR_QUALITY_PM2_5_RX_PIN
-#define AIR_QUALITY_PM2_5_RX_PIN 1
+#define AIR_QUALITY_PM2_5_RX_PIN 9
 #endif
 
-#ifndef AIR_QUALITY_PM2_5_UART_PIN
-#define AIR_QUALITY_PM2_5_UART uart0
+#ifndef AIR_QUALITY_PM2_5_UART
+#define AIR_QUALITY_PM2_5_UART uart1
+#endif
+
+#ifndef AIR_QUALITY_ADC_BATT_GPIO_PIN
+#define AIR_QUALITY_ADC_BATT_GPIO_PIN 28
+#endif
+
+#ifndef AIR_QUALITY_ADC_BATT_ADC_CH
+#define AIR_QUALITY_ADC_BATT_ADC_CH 2
 #endif
 
 #ifndef PICO_BOARD
@@ -39,11 +50,25 @@
 #define PICO_TARGET_NAME "unknown"
 #endif
 
+/* Operational Flags */
+#define AIR_QUALITY_OP_FLAG_WIFI_ON 0x0001
+
+/* Useful local macros */
+#define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
+
+/*
+**********************************************************************
+******************** PROGRAM DEFINITIONS *****************************
+**********************************************************************
+*/
+
 typedef struct {
 	absolute_time_t lastblink;
 	uint8_t laststate;
 	int16_t blink_delay; /* in ms */
 } air_quality_led_config;
+
+static uint16_t op_reg = 0; /**< @brief Operational Register */
 
 /** @brief Print errors to stdout when things go wrong */
 void air_quality_handle_error(int16_t);
@@ -59,6 +84,24 @@ static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b);
 
 static int32_t aq_read_raw_humidity(bme680_intf *b_intf);
 
+static void aq_print(const char *s, size_t len);
+
+/*
+**********************************************************************
+********************** PROGRAM IMPLEMENTATIONS ***********************
+**********************************************************************
+*/
+
+void aq_print(const char *s, size_t len)
+{
+	printf("%s", s);
+
+	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON) {
+		DEBUGDATA("Attempting to write WiFi", s, "%s");
+		wifi_send_string(s, len);
+	}
+}
+
 void air_quality_handle_error(int16_t err)
 {
 	printf("There was an error %d\n", err);
@@ -72,30 +115,55 @@ void air_quality_handle_error(int16_t err)
 
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 {
-	printf("{\"sensor\": \"BME680\", \"data\": [");
-	printf("{\"name\": \"temperature\", "
-	       "\"value\": %.2f, "
-	       "\"unit\": \"degC\", "
-	       "\"timemillis\": %lu}, ", d->temperature,
-	       (unsigned long) millis);
-	printf("{\"name\": \"pressure\", "
-	       "\"value\": %.2f, "
-	       "\"unit\": \"Pa\", "
-	       "\"timemillis\": %lu}, ", d->pressure,
-	       (unsigned long) millis);
-	printf("{\"name\": \"humidity\", "
-	       "\"value\": %.2f, "
-	       "\"unit\": \"%%\", "
-	       "\"timemillis\": %lu}, ", d->humidity,
-	       (unsigned long) millis);
-	printf("{\"name\": \"gas resistance\", "
-	       "\"value\": %.2f, "
-	       "\"unit\": \"ul\", "
-	       "\"timemillis\": %lu}], ", 
-	       d->gas_resistance, (unsigned long) millis);
-	printf("\"status\": {"
-	       "\"sensor\": \"%#x\"}}",
-	       d->status);
+	char printbuf[512];
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"sensor\": \"BME680\", \"data\": [");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"temperature\", "
+		 "\"value\": %.2f, "
+		 "\"unit\": \"degC\", "
+		 "\"timemillis\": %lu}, ", d->temperature,
+		 (unsigned long) millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"pressure\", "
+		 "\"value\": %.2f, "
+		 "\"unit\": \"Pa\", "
+		 "\"timemillis\": %lu}, ", d->pressure,
+		 (unsigned long) millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"humidity\", "
+		 "\"value\": %.2f, "
+		 "\"unit\": \"%%\", "
+		 "\"timemillis\": %lu}, ", d->humidity,
+		 (unsigned long) millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"gas resistance\", "
+		 "\"value\": %.2f, "
+		 "\"unit\": \"ul\", "
+		 "\"timemillis\": %lu}], ", 
+		 d->gas_resistance, (unsigned long) millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "\"status\": {"
+		 "\"sensor\": \"%#x\"}}",
+		 d->status);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
 }
 
 void air_quality_status_led_init(air_quality_led_config *conf,
@@ -283,24 +351,40 @@ int8_t aq_bme280_sample(bme280_intf *b_intf)
 void aq_bme280_print_data(bme280_intf *b_intf, unsigned long millis)
 {
 	struct bme280_data *d = &b_intf->data;
+	char printbuf[512];
 
-	printf("{\"sensor\": \"BME280\", "
-	       "\"data\": [");
-	printf("{\"name\": \"temperature\", "
-	       "\"value\": %0.2f, "
-	       "\"unit\": \"degC\", "
-	       "\"timemillis\": %lu}, ",
-	       d->temperature, millis);
-	printf("{\"name\": \"pressure\", "
-	       "\"value\": %0.2f, "
-	       "\"unit\": \"Pa\", "
-	       "\"timemillis\": %lu}, ",
-	       d->pressure, millis);
-	printf("{\"name\": \"humidity\", "
-	       "\"value\": %0.2f, "
-	       "\"unit\": \"%%\", "
-	       "\"timemillis\": %lu}]}",
-	       d->humidity, millis);
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"sensor\": \"BME280\", "
+		 "\"data\": [");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"temperature\", "
+		 "\"value\": %0.2f, "
+		 "\"unit\": \"degC\", "
+		 "\"timemillis\": %lu}, ",
+		 d->temperature, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"pressure\", "
+		 "\"value\": %0.2f, "
+		 "\"unit\": \"Pa\", "
+		 "\"timemillis\": %lu}, ",
+		 d->pressure, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"humidity\", "
+		 "\"value\": %0.2f, "
+		 "\"unit\": \"%%\", "
+		 "\"timemillis\": %lu}]}",
+		 d->humidity, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
 }
 
 void aq_bme280_handle_error(int8_t i_errno)
@@ -331,25 +415,106 @@ void aq_bme280_handle_error(int8_t i_errno)
 	       bme280_iface_err_description(i_errno));
 }
 
-void aq_pm2_5_print_data(pm2_5_data *d, unsigned long millis)
+void aq_pm2_5_print_data(pm2_5_dev *dev, pm2_5_data *d,
+			 unsigned long millis)
 {
-	printf("{\"sensor\": \"PMS 5003\", "
-	       "\"data\": [");
-	printf("{\"name\": \"PM1.0 Std\", "
-	       "\"value\": %u, "
-	       "\"unit\": \"ug/m^3\", "
-	       "\"timemillis\": %lu}, ",
-	       d->pm1_0_std, millis);
-	printf("{\"name\": \"PM2.5 Std\", "
-	       "\"value\": %u, "
-	       "\"unit\": \"ug/m^3\", "
-	       "\"timemillis\": %lu}, ",
-	       d->pm2_5_std, millis);
-	printf("{\"name\": \"pm10_std\", "
-	       "\"value\": %u, "
-	       "\"unit\": \"ug/m^3\", "
-	       "\"timemillis\": %lu}]}",
-	       d->pm10_std, millis);
+	char printbuf[512];
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"sensor\": \"PMS 5003\", "
+		 "\"data\": [");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"PM1.0 Std\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"ug/m^3\", "
+		 "\"timemillis\": %lu}, ",
+		 d->pm1_0_std, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"PM2.5 Std\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"ug/m^3\", "
+		 "\"timemillis\": %lu}, ",
+		 d->pm2_5_std, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"pm10_std\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"ug/m^3\", "
+		 "\"timemillis\": %lu}, ",
+		 d->pm10_std, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 0.3um\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}, ",
+		 d->np_0_3, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 0.5um\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}, ",
+		 d->np_0_5, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 1.0um\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}, ",
+		 d->np_1_0, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 2.5um\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}, ",
+		 d->np_2_5, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 5.0\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}, ",
+		 d->np_5_0, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"NP > 10\", "
+		 "\"value\": %u, "
+		 "\"unit\": \"num/0.1L air\", "
+		 "\"timemillis\": %lu}], ",
+		 d->np_10, millis);
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "\"status\": {"
+		 "\"opmode\": \"%s\", "
+		 "\"sleep\": %s}}",
+		 dev->mode == PM2_5_MODE_ACTIVE ? "ACTIVE" : "PASSIVE",
+		 dev->sleep ? "true" : "false");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
 }
 
 void aq_pm2_5_handle_error(int8_t i_errno)
@@ -380,6 +545,81 @@ void aq_pm2_5_handle_error(int8_t i_errno)
 	       pm2_5_err_description(i_errno));
 }
 
+int wifi_send_string(const char *s, size_t len)
+{
+	int ret;
+	char cmd[64];
+	char rsp[2048];
+
+	if (strnlen(s, len) == 0)
+		return 0;
+
+	snprintf(cmd, ARRAY_LEN(cmd) - 1, "AT+CIPSEND=%u,%u",
+		 0u, strnlen(s, len));
+
+	ret = send_wifi_cmd(cmd, rsp, ARRAY_LEN(rsp));
+
+	DEBUGDATA("AT Send CMD", rsp, "%s");
+
+	if (ret < 0)
+		return ret;
+
+	ret = send_wifi_cmd(s, rsp, ARRAY_LEN(rsp));
+
+	DEBUGDATA("AT data response", rsp, "%s");
+
+	return ret;
+}
+
+void aq_adc_init()
+{
+	adc_init();
+
+	adc_gpio_init(AIR_QUALITY_ADC_BATT_GPIO_PIN);
+}
+
+double aq_batt_voltage()
+{
+	const double cf = 2 * 3.3d / (1 << 12);
+	adc_select_input(AIR_QUALITY_ADC_BATT_ADC_CH);
+
+	return cf * (double) adc_read();
+}
+
+void aq_print_batt()
+{
+	char printbuf[512];
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"sensor\": \"Board\", "
+		 "\"data\": [");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "{\"name\": \"V Batt\", "
+		 "\"value\": %0.2f, "
+		 "\"unit\": \"V\", "
+		 "\"timemillis\": %lu}], ",
+		 aq_batt_voltage(),
+		 to_ms_since_boot(get_absolute_time()));
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+
+	snprintf(printbuf, ARRAY_LEN(printbuf) - 1,
+		 "\"status\": {"
+		 "\"charging\": \"%s\"}}",
+		 "unknown");
+
+	aq_print(printbuf, ARRAY_LEN(printbuf));
+}
+
+/*
+**********************************************************************
+****************************** MAIN **********************************
+**********************************************************************
+*/
+
 int main() {
 	int8_t ret = 0;
 
@@ -398,7 +638,7 @@ int main() {
 	const uint16_t sample_delay_ms = 10000;
 	absolute_time_t next_sample_time;
 
-	stdio_init_all();
+	stdio_usb_init();
 
 	init_info_led();
 	write_info_led_color(0, 75, 0);
@@ -406,8 +646,11 @@ int main() {
 #ifdef AIR_QUALITY_WAIT_CONNECTION
 	for (;;) {
 
+		write_info_led_color(0, 0, 25);
+
 		if (stdio_usb_connected()) {
 			printf("Welcome! You are connected!\n");
+			write_info_led_color(0, 75, 0);
 			break;
 		}
 
@@ -417,7 +660,7 @@ int main() {
 
 	/* Turn on status LED */
 	air_quality_status_led_init(&led_conf, -1);
-	air_quality_status_led_on(&led_conf);
+	/*air_quality_status_led_on(&led_conf);*/
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -442,6 +685,33 @@ int main() {
 		return 1;
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */
+
+	/* Initialize battery checker */
+	aq_adc_init();
+
+	/* Initialize WiFi Module */
+	if (init_wifi_module() < 0) {
+		printf("ERROR: Failed to intitialize WiFi module\n");
+	} else {
+		char rsp[512];
+
+		/* If connected successfully print WiFi settings */
+		send_wifi_cmd("AT+CWMODE?", rsp, ARRAY_LEN(rsp));
+		printf("%s", rsp);
+
+		/* Set up server */
+		send_wifi_cmd("AT+CIPMUX=1", rsp, ARRAY_LEN(rsp));
+		DEBUGDATA("When muxing ESP", rsp, "%s");
+
+		if (send_wifi_cmd("AT+CIPSERVER=1", rsp, ARRAY_LEN(rsp)) == 0) {
+			op_reg |= AIR_QUALITY_OP_FLAG_WIFI_ON;
+		}
+
+#ifdef AIR_QUALITY_WAIT_CONNECTION
+		wifi_passthrough();
+#endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
+
+	}
 
 	/* Keep trying to connect to sensor until there is a
 	 * success */
@@ -480,6 +750,7 @@ int main() {
 	 * successful. This loop will only break on error. */
 	for (;;) {
 		absolute_time_t readtime;
+		uint8_t print_pm = 0;
 
 		air_quality_status_led_on(&led_conf);
 
@@ -505,17 +776,39 @@ int main() {
 
 		ret = pm2_5_get_data(&p_intf.dev, &pdata);
 		aq_pm2_5_handle_error(ret);
+		print_pm = ret == 0 ? 1 : 0;
 
 		/* Print out all the data */
-		printf("{\"program\": \"%s\", \"board\": \"%s\", "
-		       "\"output\": [",
-		       PICO_TARGET_NAME, PICO_BOARD);
+		char s[256];
+
+		snprintf(s, ARRAY_LEN(s),
+			 "{\"program\": \"%s\", \"board\": \"%s\", "
+			 "\"output\": [",
+			 PICO_TARGET_NAME, PICO_BOARD);
+		aq_print(s, ARRAY_LEN(s));
+
+		aq_print_batt();
+
+		snprintf(s, ARRAY_LEN(s), ", ");
+		aq_print(s, ARRAY_LEN(s));
+
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
-		printf(", ");
+
+		snprintf(s, ARRAY_LEN(s), ", ");
+		aq_print(s, ARRAY_LEN(s));
+
 		aq_bme280_print_data(&b280_intf, to_ms_since_boot(readtime));
-		printf(", ");
-		aq_pm2_5_print_data(&pdata, readtime);
-		printf("]}\n");
+
+		if (print_pm) {
+			snprintf(s, ARRAY_LEN(s), ", ");
+			aq_print(s, ARRAY_LEN(s));
+
+			aq_pm2_5_print_data(&p_intf.dev, &pdata,
+					    to_ms_since_boot(readtime));
+		}
+
+		snprintf(s, ARRAY_LEN(s) - 1, "]}\n");
+		aq_print(s, ARRAY_LEN(s));
 	}
 
 	/* Deinit i2c if loop broke */
