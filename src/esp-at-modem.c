@@ -9,9 +9,15 @@
 
 #include "pico/stdlib.h"
 
+#define _ESP_EN_DELAY_US 500000
+#define _ESP_RESET_HOLD_US 20000
+
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
-void _esp_en_gpio_setup();
+static void _esp_en_gpio_setup();
+static void _esp_reset_gpio_setup();
+static void _esp_set_enabled(bool en); /* True to enable, false to disable */
+static void _esp_reset();
 
 int init_wifi_module()
 {
@@ -21,8 +27,9 @@ int init_wifi_module()
 
 	DEBUGMSG("Initializing WiFi");
 
-	/* Enable WiFi module */
-	/* _esp_en_gpio_setup(); */
+	/* Initialize gpio pins for enable and reset */
+	_esp_en_gpio_setup();
+	_esp_reset_gpio_setup();
 
 	/* Set up TX */
 	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_tx_program);
@@ -37,6 +44,11 @@ int init_wifi_module()
 	uart_rx_program_init(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_RX_SM,
 			     offset, AIR_QUALITY_WIFI_RX_PIN,
 			     AIR_QUALITY_WIFI_BAUD);
+
+	/* Reset and enable ESP8266 */
+	_esp_set_enabled(true);
+	_esp_reset();
+	sleep_us(_ESP_EN_DELAY_US); /* Module may need time to boot */
 
 	/* Check connection */
 	return send_wifi_cmd("AT", rxbuf, rxlen);
@@ -87,6 +99,10 @@ int send_wifi_cmd(const char *cmd, char *rsp, unsigned int len)
 			
 				return -1;
 			}
+
+			rsp[i+1] = '\0';
+
+			DEBUGDATA("AT Response so far", rsp, "%s");
 		}
 	}
 
@@ -189,9 +205,41 @@ void _esp_en_gpio_setup()
 
 	/* Set GPIO settings */
 	gpio_set_dir(gpin, true);
-	/* gpio_disable_pulls(gpin); */
-	gpio_pull_up(gpin);
+	gpio_disable_pulls(gpin);
 
-	/* Set GPIO high to enable wifi */
+	/* Set GPIO low to start disabled */
+	gpio_put(gpin, false);
+}
+
+void _esp_reset_gpio_setup()
+{
+	const uint gpin = AIR_QUALITY_WIFI_GPIO_RESET_PIN;
+
+	gpio_init(gpin);
+
+	/* Set GPIO settings */
+	gpio_set_dir(gpin, true);
+	gpio_disable_pulls(gpin);
+
+	/* Set GPIO high to start in the non-reset position */
 	gpio_put(gpin, true);
+}
+
+void _esp_set_enabled(bool en)
+{
+	const uint gpin = AIR_QUALITY_WIFI_GPIO_EN_PIN;
+
+	/* High enabled, low disabled */
+	gpio_put(gpin, en);
+}
+
+void _esp_reset()
+{
+	const uint gpin = AIR_QUALITY_WIFI_GPIO_RESET_PIN;
+
+	gpio_put(gpin, false); /* Drive low to reset module */
+
+	sleep_us(_ESP_RESET_HOLD_US); /* Hold down reset for a bit */
+
+	gpio_put(gpin, true); /* Return reset pin to normal */
 }

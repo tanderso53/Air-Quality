@@ -15,7 +15,7 @@
 #include "hardware/adc.h"
 
 #ifndef AIR_QUALITY_STATUS_LED
-#define AIR_QUALITY_STATUS_LED 13
+#define AIR_QUALITY_STATUS_LED 24
 #endif
 
 #ifndef AIR_QUALITY_INFO_LED_PIN

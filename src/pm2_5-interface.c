@@ -41,6 +41,9 @@
 
 #include "pm2_5-interface.h"
 
+static void _pm2_5_fan_power_gpio_setup();
+static void _pm2_5_fan_power_set_enabled(bool en);
+
 int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 {
 	int8_t rst;
@@ -53,6 +56,10 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	if (intf->uart != uart1 && intf->uart != uart0) {
 		return PM2_5_E_NULL_PTR;
 	}
+
+	/* Enable fan power module */
+	_pm2_5_fan_power_gpio_setup();
+	_pm2_5_fan_power_set_enabled(true);
 
 	/* Initialize the uart interface */
 	uart_init(intf->uart, PM2_5_DEFAULT_BAUD);
@@ -141,3 +148,24 @@ uint8_t pm2_5_user_available(void *intf_ptr)
 	return uart_is_readable(i_ptr->uart) ? 1 : 0;
 }
 
+void _pm2_5_fan_power_gpio_setup()
+{
+	const uint gpin = PM2_5_INTERFACE_GPIO_EN_PIN;
+
+	gpio_init(gpin);
+
+	/* Set GPIO settings */
+	gpio_set_dir(gpin, true);
+	gpio_disable_pulls(gpin);
+
+	/* Set GPIO low to start disabled */
+	gpio_put(gpin, false);
+}
+
+void _pm2_5_fan_power_set_enabled(bool en)
+{
+	const uint gpin = PM2_5_INTERFACE_GPIO_EN_PIN;
+
+	/* High enabled, low disabled */
+	gpio_put(gpin, en);
+}
