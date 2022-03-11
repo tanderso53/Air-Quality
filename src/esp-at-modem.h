@@ -11,6 +11,10 @@
 #define AIR_QUALITY_WIFI_RX_PIN 11
 #endif
 
+#ifndef AIR_QUALITY_WIFI_GPIO_EN_PIN
+#define AIR_QUALITY_WIFI_GPIO_EN_PIN 12
+#endif
+
 #ifndef AIR_QUALITY_WIFI_PIO
 #define AIR_QUALITY_WIFI_PIO pio1
 #endif

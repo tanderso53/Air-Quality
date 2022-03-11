@@ -11,6 +11,8 @@
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
+void _esp_en_gpio_setup();
+
 int init_wifi_module()
 {
 	uint offset;
@@ -18,6 +20,9 @@ int init_wifi_module()
 	char rxbuf[rxlen];
 
 	DEBUGMSG("Initializing WiFi");
+
+	/* Enable WiFi module */
+	/* _esp_en_gpio_setup(); */
 
 	/* Set up TX */
 	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_tx_program);
@@ -174,4 +179,19 @@ void wifi_passthrough()
 			break;
 		}
 	}
+}
+
+void _esp_en_gpio_setup()
+{
+	const uint gpin = AIR_QUALITY_WIFI_GPIO_EN_PIN;
+
+	gpio_init(gpin);
+
+	/* Set GPIO settings */
+	gpio_set_dir(gpin, true);
+	/* gpio_disable_pulls(gpin); */
+	gpio_pull_up(gpin);
+
+	/* Set GPIO high to enable wifi */
+	gpio_put(gpin, true);
 }
