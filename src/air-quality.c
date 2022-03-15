@@ -98,7 +98,7 @@ void aq_print(const char *s, size_t len)
 
 	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON) {
 		DEBUGDATA("Attempting to write WiFi", s, "%s");
-		wifi_send_string(s, len);
+		esp_at_cipsend_string(s, len);
 	}
 }
 
@@ -545,32 +545,6 @@ void aq_pm2_5_handle_error(int8_t i_errno)
 	       pm2_5_err_description(i_errno));
 }
 
-int wifi_send_string(const char *s, size_t len)
-{
-	int ret;
-	char cmd[64];
-	char rsp[2048];
-
-	if (strnlen(s, len) == 0)
-		return 0;
-
-	snprintf(cmd, ARRAY_LEN(cmd) - 1, "AT+CIPSEND=%u,%u",
-		 0u, strnlen(s, len));
-
-	ret = send_wifi_cmd(cmd, rsp, ARRAY_LEN(rsp));
-
-	DEBUGDATA("AT Send CMD", rsp, "%s");
-
-	if (ret < 0)
-		return ret;
-
-	ret = send_wifi_cmd(s, rsp, ARRAY_LEN(rsp));
-
-	DEBUGDATA("AT data response", rsp, "%s");
-
-	return ret;
-}
-
 void aq_adc_init()
 {
 	adc_init();
@@ -690,20 +664,20 @@ int main() {
 	aq_adc_init();
 
 	/* Initialize WiFi Module */
-	if (init_wifi_module() < 0) {
+	if (esp_at_init_module() < 0) {
 		printf("ERROR: Failed to intitialize WiFi module\n");
 	} else {
 		char rsp[512];
 
 		/* If connected successfully print WiFi settings */
-		send_wifi_cmd("AT+CWMODE?", rsp, ARRAY_LEN(rsp));
+		esp_at_send_cmd("AT+CWMODE?", rsp, ARRAY_LEN(rsp));
 		printf("%s", rsp);
 
 		/* Set up server */
-		send_wifi_cmd("AT+CIPMUX=1", rsp, ARRAY_LEN(rsp));
+		esp_at_send_cmd("AT+CIPMUX=1", rsp, ARRAY_LEN(rsp));
 		DEBUGDATA("When muxing ESP", rsp, "%s");
 
-		if (send_wifi_cmd("AT+CIPSERVER=1", rsp, ARRAY_LEN(rsp)) == 0) {
+		if (esp_at_send_cmd("AT+CIPSERVER=1", rsp, ARRAY_LEN(rsp)) == 0) {
 			op_reg |= AIR_QUALITY_OP_FLAG_WIFI_ON;
 		}
 
