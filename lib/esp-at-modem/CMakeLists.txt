@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.22)
 
 project(esp-at-modem)
 
+add_subdirectory(
+  ${CMAKE_CURRENT_LIST_DIR}/lib)
+
 add_library(esp-at-modem INTERFACE)
 
 target_sources(esp-at-modem INTERFACE
@@ -19,4 +22,4 @@ target_include_directories(esp-at-modem INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_link_libraries(esp-at-modem INTERFACE
-  pico_stdlib hardware_pio debugmsg)
+  at-parse pico_stdlib hardware_pio debugmsg)
