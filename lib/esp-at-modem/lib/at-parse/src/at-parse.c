@@ -70,38 +70,33 @@ int at_rsp_assign_token(const char *content, at_rsp_tk *tk)
 int at_rsp_tokenize_line(const char *line,
 			 at_rsp_line_tokens *tok)
 {
-	char v[1028][AT_RESPONSE_MAX_TOKENS];
 	char str[1028];
+	char *lastp = NULL;
+	char *starttk = NULL;
 	unsigned int n_tok = 0;
 
 	strncpy(str, line, sizeof(str) - 1);
 	str[ARRAY_LEN(str) - 1] = '\0';
 
-	for (char *tk = strtok(str, ":"); tk; tk = strtok(NULL, ":")) {
-		char *elem = v[n_tok];
-		unsigned int buflen = ARRAY_LEN(v[n_tok]);
+	for (char *tk = strtok_r(str, ":", &lastp); tk;
+	     tk = strtok_r(NULL, ":", &lastp)) {
+		if (lastp && tk != lastp) {
+			strncpy(tok->preamble, tk,
+				sizeof(tok->preamble) - 1);
+			tok->preamble[ARRAY_LEN(tok->preamble) - 1] = '\0';
+			starttk = lastp;
+		}
+	}
 
-		strncpy(elem, tk, buflen - 1);
-		elem[buflen - 1] = '\0';
+	if (!starttk) {
+		return 0;
+	}
+
+	for (char *tk = strtok_r(starttk, ",", &lastp); tk;
+	     tk = strtok_r(NULL, ",", &lastp)) {
+		at_rsp_assign_token(tk, &tok->tokenlist[n_tok]);
 
 		++n_tok;
-	}
-
-	if (n_tok > 1) {
-		strncpy(tok->preamble, v[n_tok - 2],
-			sizeof(tok->preamble) - 1);
-		tok->preamble[ARRAY_LEN(tok->preamble) - 1] = '\0';
-	}
-
-	if (n_tok > 0) {
-		strncpy(str, v[n_tok - 1], ARRAY_LEN(str) - 1);
-		str[ARRAY_LEN(str) - 1] = '\0';
-	}
-
-	n_tok = 0;
-
-	for (char *tk = strtok(str, ","); tk; tk = strtok(NULL, ",")) {
-		at_rsp_assign_token(tk, &tok->tokenlist[n_tok]);
 	}
 
 	tok->ntokens = n_tok;
@@ -113,11 +108,13 @@ int at_rsp_get_lines(const char *rsp,
 		     at_rsp_lines *lines)
 {
 	char buf[4096];
+	char *last;
 	unsigned int n_tok = 0;
 
 	_at_replace_cr(buf, rsp, ARRAY_LEN(buf));
 
-	for (char *tk = strtok(buf, "\n"); tk; tk = strtok(NULL, "\n")) {
+	for (char *tk = strtok_r(buf, "\n", &last); tk;
+	     tk = strtok_r(NULL, "\n", &last)) {
 		at_rsp_line_tokens *line = &lines->tokenlists[n_tok];
 
 		if (at_rsp_tokenize_line(tk, line) > 0) {
