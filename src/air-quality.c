@@ -682,7 +682,7 @@ int main() {
 		}
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
-		wifi_passthrough();
+		esp_at_passthrough();
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
 	}
