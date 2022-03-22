@@ -111,10 +111,15 @@ int esp_at_cipserver_init();
  *
  * @param len Number of char to send
  *
+ * @param clientlist Initialized @ref esp_at_status object with list
+ * of clients. If NULL is passed, a client with index of 0 will be
+ * used
+ *
  * @return Number of char sent on success
  * @return <0 on failure
  */
-int esp_at_cipsend_string(const char *s, size_t len);
+int esp_at_cipsend_string(const char *s, size_t len,
+			  esp_at_status *clientlist);
 
 /** Get status information from co-processor
  *

@@ -24,6 +24,8 @@ static void _esp_en_gpio_setup();
 static void _esp_reset_gpio_setup();
 static void _esp_set_enabled(bool en); /* True to enable, false to disable */
 static void _esp_reset();
+static int _esp_cipsend_data(const char *data, size_t len,
+			     unsigned int client_index);
 
 int esp_at_init_module()
 {
@@ -82,30 +84,30 @@ int esp_at_cipserver_init()
 	return 0;
 }
 
-int esp_at_cipsend_string(const char *s, size_t len)
+int esp_at_cipsend_string(const char *s, size_t len,
+			  esp_at_status *clientlist)
 {
 	int ret;
-	char cmd[64];
-	char rsp[2048];
 
 	if (strnlen(s, len) == 0)
 		return 0;
 
-	snprintf(cmd, ARRAY_LEN(cmd) - 1, "AT+CIPSEND=%u,%u",
-		 0u, strnlen(s, len));
-
-	ret = esp_at_send_cmd(cmd, rsp, ARRAY_LEN(rsp));
-
-	DEBUGDATA("AT Send CMD", rsp, "%s");
-
-	if (ret < 0)
+	if (!clientlist) {
+		ret = _esp_cipsend_data(s, len, 0);
 		return ret;
+	}
 
-	ret = esp_at_send_cmd(s, rsp, sizeof(rsp));
+	for (unsigned int i = 0; i < clientlist->ncli; ++i) {
+		unsigned int ci = clientlist->cli[i].index;
 
-	DEBUGDATA("AT data response", rsp, "%s");
+		ret = _esp_cipsend_data(s, len, ci);
 
-	return ret;
+		if (ret < 0) {
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 int esp_at_cipstatus(esp_at_status *clientlist)
@@ -540,6 +542,30 @@ int _esp_query(const char * cmd, at_rsp_lines *rsp)
 	}
 
 	ret = at_rsp_get_lines(buf, rsp);
+
+	return ret;
+}
+
+int _esp_cipsend_data(const char *data, size_t len,
+		      unsigned int client_index)
+{
+	int ret;
+	char cmd[64];
+	char rsp[2048];
+
+	snprintf(cmd, ARRAY_LEN(cmd) - 1, "AT+CIPSEND=%u,%u",
+		 client_index, strnlen(data, len));
+	
+	ret = esp_at_send_cmd(cmd, rsp, ARRAY_LEN(rsp));
+
+	DEBUGDATA("AT Send CMD", rsp, "%s");
+
+	if (ret < 0)
+		return ret;
+
+	ret = esp_at_send_cmd(data, rsp, sizeof(rsp));
+
+	DEBUGDATA("AT data response", rsp, "%s");
 
 	return ret;
 }
