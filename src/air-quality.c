@@ -112,8 +112,7 @@ void aq_nprintf(const char * restrict format, ...)
 
 	printf(s);
 
-	if (op_reg & (AIR_QUALITY_OP_FLAG_WIFI_ON |
-		      AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED)) {
+	if (op_reg & AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED) {
 		DEBUGDATA("Attempting to write WiFi", s, "%s");
 		esp_at_cipsend_string(s, sizeof(s), &aq_wifi_status);
 	}
@@ -537,8 +536,14 @@ void aq_wifi_set_flags()
 		op_reg &= ~(AIR_QUALITY_OP_FLAG_WIFI_ON |
 			    AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED);
 
+		DEBUGDATA("esp_at_cipstatus() failed with status",
+			  rslt, "%d");
+
 		return;
 	}
+
+	DEBUGDATA("Checking wifi status:", aq_wifi_status.status,
+		  "%#.4x");
 
 	/* need to know if clients are connected so we
 	 * don't waste time writing to them */
@@ -722,8 +727,9 @@ int main() {
 
 		/* Print out all the data */
 		aq_nprintf("{\"program\": \"%s\", \"board\": \"%s\", "
+			   "\"status\": 0x%.4x, "
 			   "\"output\": [",
-			   PICO_TARGET_NAME, PICO_BOARD);
+			   PICO_TARGET_NAME, PICO_BOARD, op_reg);
 
 		aq_print_batt();
 

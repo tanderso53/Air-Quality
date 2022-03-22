@@ -136,6 +136,7 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 			break;
 		}
 
+		clientlist->status |= ESP_AT_STATUS_WIFI_CONNECTED;
 		strncpy(clientlist->ipv4, at_rsp_token_as_str(ipv4),
 			sizeof(clientlist->ipv4) - 1);
 		clientlist->ipv4[ARRAY_LEN(clientlist->ipv4) - 1] = '\0';
@@ -161,11 +162,11 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 		switch (at_rsp_token_as_int(status)) {
 		case 0:
 		case 1:
-		case 2:
 		case 5:
 			clientlist->status &= ~(ESP_AT_STATUS_SERVER_ON |
 						ESP_AT_STATUS_CLIENT_CONNECTED);
 			break;
+		case 2:
 		case 3:
 		case 4:
 			clientlist->status |= ESP_AT_STATUS_SERVER_ON;
@@ -186,14 +187,20 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 			at_rsp_tk *tkptr;
 			char proto[6] = {'\0'};
 
+			DEBUGDATA("CIPSTATUS line", i, "%u");
+			DEBUGDATA("Preamble", preamble, "%s");
+
 			tkptr = rsp.tokenlists[i].tokenlist;
 
 			if (strcmp(preamble, "+CIPSTATUS") != 0) {
-				break;
+				DEBUGDATA("Doesn't match +CIPSTATUS",
+					  i, "%u");
+				continue;
 			}
 
 			cptr = &clientlist->cli[clientlist->ncli];
 			cptr->index = at_rsp_token_as_int(&tkptr[0]);
+			DEBUGDATA("Working on index", cptr->index, "%d");
 
 			/* protocol requires furthur processing
 			 * later */
@@ -204,7 +211,7 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 				at_rsp_token_as_str(&tkptr[2]),
 				sizeof(cptr->ipv4) - 1);
 			cptr->r_port = at_rsp_token_as_int(&tkptr[3]);
-			cptr->r_port = at_rsp_token_as_int(&tkptr[4]);
+			cptr->l_port = at_rsp_token_as_int(&tkptr[4]);
 			cptr->passive = at_rsp_token_as_int(&tkptr[5]);
 
 			if (cptr->passive) {
