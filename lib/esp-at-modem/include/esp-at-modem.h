@@ -87,9 +87,10 @@ typedef struct {
 	uint8_t sleep; /**< 0 for awake, 1 for sleep, 2 for deep sleep */
 	esp_at_clients cli[ESP_AT_MAX_CONN]; /**< List of connected clients */
 	uint16_t ncli; /**< Number of connected clients */
-	char ipv4[16]; /**< IP address of co-processor */
+	char ipv4[24]; /**< IP address of co-processor */
 	uint16_t port; /**< Port CIP server is listening on */
-	char ipv4_gateway[16]; /**< IP address of the gateway */
+	char ipv4_gateway[24]; /**< IP address of the gateway */
+	char ipv4_netmask[24]; /**< Netmask of local network */
 	char ssid[128]; /**< SSID of wireless network */
 } esp_at_status;
 

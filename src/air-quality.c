@@ -92,6 +92,8 @@ static void aq_nprintf(const char * restrict format, ...);
 
 static void aq_wifi_set_flags();
 
+static uint16_t aq_abrev_netmask(const char *nm);
+
 /*
 **********************************************************************
 ********************** PROGRAM IMPLEMENTATIONS ***********************
@@ -560,6 +562,42 @@ void aq_wifi_set_flags()
 	}
 }
 
+uint16_t aq_abrev_netmask(const char *nm)
+{
+	char str[24];
+	uint32_t mask = 0;
+	char *tk;
+	char *last;
+
+	DEBUGDATA("Full netmask", nm, "%s");
+
+	if (!nm) {
+		return -1;
+	}
+
+	strncpy(str, nm, sizeof(str) - 1);
+	str[ARRAY_LEN(str) - 1] = '\0';
+
+	for (tk = strtok_r(str, ".", &last);
+	     tk;
+	     tk = strtok_r(NULL, ".", &last)) {
+		uint32_t bits;
+
+		mask = mask << 8;
+
+		bits = strtol(tk, NULL, 10);
+		DEBUGDATA("Netmask byte", bits, "%lu");
+		mask = mask | bits;
+	}
+
+	for (uint16_t i = 0; i < 32; ++i) {
+		if (mask & (1ul << i))
+			return 32 - i;
+	}
+
+	return 0;
+}
+
 /*
 **********************************************************************
 ****************************** MAIN **********************************
@@ -727,9 +765,12 @@ int main() {
 
 		/* Print out all the data */
 		aq_nprintf("{\"program\": \"%s\", \"board\": \"%s\", "
-			   "\"status\": 0x%.4x, "
+			   "\"status\": %u, "
+			   "\"ip address\": \"%s/%d\", "
 			   "\"output\": [",
-			   PICO_TARGET_NAME, PICO_BOARD, op_reg);
+			   PICO_TARGET_NAME, PICO_BOARD, op_reg,
+			   aq_wifi_status.ipv4,
+			   aq_abrev_netmask(aq_wifi_status.ipv4_netmask));
 
 		aq_print_batt();
 

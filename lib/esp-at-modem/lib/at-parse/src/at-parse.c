@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <ctype.h>
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
@@ -34,35 +35,45 @@ int at_rsp_assign_token(const char *content, at_rsp_tk *tk)
 		char c = content[i];
 
 		switch (c) {
-		case '\\':
-			if (is_esc) {
-				is_esc = true;
-				continue;
-			}
-			break;
-		case '"':
-			if (is_esc) {
-				in_para = in_para ? false : true;
-				tk->type = AT_RSP_TK_TYPE_STR;
-				break;
-			}
-			continue;
 		case '\0':
-			tk->content[i] = c;
+			tk->content[wi] = c;
 
 			if (in_para) {
 				return -1;
 			}
 
 			return wi;
+		case '\\':
+			if (is_esc) {
+				tk->content[wi] = c;
+				++wi;
+			}
+
+			is_esc = !is_esc;
+
+			break;
+		case '"':
+			if (is_esc) {
+				tk->content[wi] = c;
+				++wi;
+				is_esc = false;
+			} else {
+				in_para = !in_para;
+				tk->type = AT_RSP_TK_TYPE_STR;
+			}
+
+			break;
 		default:
-			tk->content[i] = c;
-			++wi;
+			if (isprint(c))
+			{
+				tk->content[wi] = c;
+				++wi;
+			}
 			break;
 		}
 	}
 
-	tk->content[AT_RESPONSE_STR_LEN - 1] = '\0';
+	tk->content[wi - 1] = '\0';
 
 	return wi;
 }

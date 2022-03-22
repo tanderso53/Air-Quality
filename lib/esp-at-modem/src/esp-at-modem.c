@@ -118,6 +118,7 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 	do {
 		at_rsp_tk *ipv4;
 		at_rsp_tk *gateway;
+		at_rsp_tk *netmask;
 
 		/* Get WiFi IP address */
 		ret = _esp_query("AT+CIPSTA?", &rsp);
@@ -126,13 +127,16 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 			return ret;
 		}
 
-		ipv4 = &at_rsp_get_property("ipv4", &rsp)->tokenlist[0];
-		gateway = &at_rsp_get_property("ipv4", &rsp)->tokenlist[0];
+		ipv4 = &at_rsp_get_property("ip", &rsp)->tokenlist[0];
+		gateway = &at_rsp_get_property("gateway", &rsp)->tokenlist[0];
+		netmask = &at_rsp_get_property("netmask", &rsp)->tokenlist[0];
 
-		if (! (ipv4 && gateway)) {
+		if (! (ipv4 && gateway && netmask)) {
+			DEBUGMSG("No network detected");
 			clientlist->status &= ~ESP_AT_STATUS_WIFI_CONNECTED;
 			clientlist->ipv4[0] ='\0';
 			clientlist->ipv4_gateway[0] = '\0';
+			clientlist->ipv4_netmask[0] = '\0';
 			break;
 		}
 
@@ -144,6 +148,10 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 			at_rsp_token_as_str(gateway),
 			sizeof(clientlist->ipv4_gateway) - 1);
 		clientlist->ipv4_gateway[ARRAY_LEN(clientlist->ipv4_gateway) - 1] = '\0';
+		strncpy(clientlist->ipv4_netmask,
+			at_rsp_token_as_str(netmask),
+			sizeof(clientlist->ipv4_netmask) - 1);
+		clientlist->ipv4_netmask[ARRAY_LEN(clientlist->ipv4_netmask) - 1] = '\0';
 	} while (0);
 
 	do {
