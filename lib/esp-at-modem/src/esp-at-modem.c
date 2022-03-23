@@ -26,6 +26,9 @@ static void _esp_set_enabled(bool en); /* True to enable, false to disable */
 static void _esp_reset();
 static int _esp_cipsend_data(const char *data, size_t len,
 			     unsigned int client_index);
+static int _esp_check_cipsta(esp_at_status *clientlist);
+static int _esp_check_cipstatus(esp_at_status *clientlist);
+static int _esp_check_cipmux(esp_at_status *clientlist);
 
 int esp_at_init_module()
 {
@@ -113,155 +116,24 @@ int esp_at_cipsend_string(const char *s, size_t len,
 int esp_at_cipstatus(esp_at_status *clientlist)
 {
 	int ret;
-	at_rsp_lines rsp;
 
-	do {
-		at_rsp_tk *ipv4;
-		at_rsp_tk *gateway;
-		at_rsp_tk *netmask;
+	ret = _esp_check_cipsta(clientlist);
 
-		/* Get WiFi IP address */
-		ret = _esp_query("AT+CIPSTA?", &rsp);
+	if (ret < 0) {
+		return ret;
+	}
 
-		if (ret < 0) {
-			return ret;
-		}
+	ret = _esp_check_cipstatus(clientlist);
 
-		ipv4 = &at_rsp_get_property("ip", &rsp)->tokenlist[0];
-		gateway = &at_rsp_get_property("gateway", &rsp)->tokenlist[0];
-		netmask = &at_rsp_get_property("netmask", &rsp)->tokenlist[0];
+	if (ret < 0) {
+		return ret;
+	}
 
-		if (! (ipv4 && gateway && netmask)) {
-			DEBUGMSG("No network detected");
-			clientlist->status &= ~ESP_AT_STATUS_WIFI_CONNECTED;
-			clientlist->ipv4[0] ='\0';
-			clientlist->ipv4_gateway[0] = '\0';
-			clientlist->ipv4_netmask[0] = '\0';
-			break;
-		}
+	ret = _esp_check_cipmux(clientlist);
 
-		clientlist->status |= ESP_AT_STATUS_WIFI_CONNECTED;
-		strncpy(clientlist->ipv4, at_rsp_token_as_str(ipv4),
-			sizeof(clientlist->ipv4) - 1);
-		clientlist->ipv4[ARRAY_LEN(clientlist->ipv4) - 1] = '\0';
-		strncpy(clientlist->ipv4_gateway,
-			at_rsp_token_as_str(gateway),
-			sizeof(clientlist->ipv4_gateway) - 1);
-		clientlist->ipv4_gateway[ARRAY_LEN(clientlist->ipv4_gateway) - 1] = '\0';
-		strncpy(clientlist->ipv4_netmask,
-			at_rsp_token_as_str(netmask),
-			sizeof(clientlist->ipv4_netmask) - 1);
-		clientlist->ipv4_netmask[ARRAY_LEN(clientlist->ipv4_netmask) - 1] = '\0';
-	} while (0);
-
-	do {
-		at_rsp_tk *status;
-
-		/* Some ESP8266 modules don't support AT+CIPSTATE, so use
-		 * AT+CIPSTATUS to get most of the networking info */
-		ret = _esp_query("AT+CIPSTATUS", &rsp);
-
-		if (ret < 0) {
-			return ret;
-		}
-
-		status = &at_rsp_get_property("STATUS", &rsp)->tokenlist[0];
-
-		switch (at_rsp_token_as_int(status)) {
-		case 0:
-		case 1:
-		case 5:
-			clientlist->status &= ~(ESP_AT_STATUS_SERVER_ON |
-						ESP_AT_STATUS_CLIENT_CONNECTED);
-			break;
-		case 2:
-		case 3:
-		case 4:
-			clientlist->status |= ESP_AT_STATUS_SERVER_ON;
-			break;
-		default:
-			return -1; /* malformed case */
-		}
-
-		/* Clients must be zeroed out before re-examining
-		 * them */
-		clientlist->ncli = 0;
-		clientlist->status &= ~(ESP_AT_STATUS_CLIENT_CONNECTED |
-					ESP_AT_STATUS_AS_CLIENT);
-
-		for (unsigned int i = 0; i < rsp.nlines; ++i) {
-			esp_at_clients *cptr;
-			const char *preamble = rsp.tokenlists[i].preamble;
-			at_rsp_tk *tkptr;
-			char proto[6] = {'\0'};
-
-			DEBUGDATA("CIPSTATUS line", i, "%u");
-			DEBUGDATA("Preamble", preamble, "%s");
-
-			tkptr = rsp.tokenlists[i].tokenlist;
-
-			if (strcmp(preamble, "+CIPSTATUS") != 0) {
-				DEBUGDATA("Doesn't match +CIPSTATUS",
-					  i, "%u");
-				continue;
-			}
-
-			cptr = &clientlist->cli[clientlist->ncli];
-			cptr->index = at_rsp_token_as_int(&tkptr[0]);
-			DEBUGDATA("Working on index", cptr->index, "%d");
-
-			/* protocol requires furthur processing
-			 * later */
-			strncpy(proto, at_rsp_token_as_str(&tkptr[1]),
-				ARRAY_LEN(proto) - 1);
-
-			strncpy(cptr->ipv4,
-				at_rsp_token_as_str(&tkptr[2]),
-				sizeof(cptr->ipv4) - 1);
-			cptr->r_port = at_rsp_token_as_int(&tkptr[3]);
-			cptr->l_port = at_rsp_token_as_int(&tkptr[4]);
-			cptr->passive = at_rsp_token_as_int(&tkptr[5]);
-
-			if (cptr->passive) {
-				clientlist->status |= ESP_AT_STATUS_CLIENT_CONNECTED;
-			} else {
-				clientlist->status |= ESP_AT_STATUS_AS_CLIENT;
-			}
-
-			/* This is the furthur processing for
-			 * protocol */
-			if (strcmp(proto, "TCP") == 0) {
-				cptr->proto = ESP_AT_CIP_PROTO_TCP;
-			} else if (strcmp(proto, "UDP") == 0) {
-				cptr->proto = ESP_AT_CIP_PROTO_UDP;
-			} else if (strcmp(proto, "SSL") == 0) {
-				cptr->proto = ESP_AT_CIP_PROTO_SSL;
-			} else {
-				cptr->proto = ESP_AT_CIP_PROTO_NULL;
-			}
-
-			++clientlist->ncli;
-		}
-	} while (0);
-
-	do {
-		at_rsp_tk *value;
-		esp_at_status_byte *status = &clientlist->status;
-		/* Query specific server parameters */
-		ret = _esp_query("AT+CIPMUX?", &rsp);
-
-		if (ret < 0) {
-			return ret;
-		}
-
-		value = &at_rsp_get_property("+CIPMUX", &rsp)->tokenlist[0];
-
-		if (at_rsp_token_as_int(value)) {
-			*status |= ESP_AT_STATUS_CIPMUX_ON;
-		} else {
-			*status &= ~ESP_AT_STATUS_CIPMUX_ON;
-		}
-	} while (0);
+	if (ret < 0) {
+		return ret;
+	}
 
 	return 0;
 }
@@ -584,3 +456,170 @@ int _esp_cipsend_data(const char *data, size_t len,
 
 	return ret;
 }
+
+int _esp_check_cipsta(esp_at_status *clientlist)
+{
+	int ret;
+	at_rsp_lines rsp;
+
+	at_rsp_tk *ipv4;
+	at_rsp_tk *gateway;
+	at_rsp_tk *netmask;
+
+	/* Get WiFi IP address */
+	ret = _esp_query("AT+CIPSTA?", &rsp);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	ipv4 = &at_rsp_get_property("ip", &rsp)->tokenlist[0];
+	gateway = &at_rsp_get_property("gateway", &rsp)->tokenlist[0];
+	netmask = &at_rsp_get_property("netmask", &rsp)->tokenlist[0];
+
+	if (! (ipv4 && gateway && netmask)) {
+		DEBUGMSG("No network detected");
+		clientlist->status &= ~ESP_AT_STATUS_WIFI_CONNECTED;
+		clientlist->ipv4[0] ='\0';
+		clientlist->ipv4_gateway[0] = '\0';
+		clientlist->ipv4_netmask[0] = '\0';
+		return 0;
+	}
+
+	clientlist->status |= ESP_AT_STATUS_WIFI_CONNECTED;
+	strncpy(clientlist->ipv4, at_rsp_token_as_str(ipv4),
+		sizeof(clientlist->ipv4) - 1);
+	clientlist->ipv4[ARRAY_LEN(clientlist->ipv4) - 1] = '\0';
+	strncpy(clientlist->ipv4_gateway,
+		at_rsp_token_as_str(gateway),
+		sizeof(clientlist->ipv4_gateway) - 1);
+	clientlist->ipv4_gateway[ARRAY_LEN(clientlist->ipv4_gateway) - 1] = '\0';
+	strncpy(clientlist->ipv4_netmask,
+		at_rsp_token_as_str(netmask),
+		sizeof(clientlist->ipv4_netmask) - 1);
+	clientlist->ipv4_netmask[ARRAY_LEN(clientlist->ipv4_netmask) - 1] = '\0';
+
+	return 0;
+}
+
+
+int _esp_check_cipstatus(esp_at_status *clientlist)
+{
+	int ret;
+	at_rsp_lines rsp;
+	at_rsp_tk *status;
+
+	/* Some ESP8266 modules don't support AT+CIPSTATE, so use
+	 * AT+CIPSTATUS to get most of the networking info */
+	ret = _esp_query("AT+CIPSTATUS", &rsp);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	status = &at_rsp_get_property("STATUS", &rsp)->tokenlist[0];
+
+	switch (at_rsp_token_as_int(status)) {
+	case 0:
+	case 1:
+	case 5:
+		clientlist->status &= ~(ESP_AT_STATUS_SERVER_ON |
+					ESP_AT_STATUS_CLIENT_CONNECTED);
+		break;
+	case 2:
+	case 3:
+	case 4:
+		clientlist->status |= ESP_AT_STATUS_SERVER_ON;
+		break;
+	default:
+		return -1; /* malformed case */
+	}
+
+	/* Clients must be zeroed out before re-examining
+	 * them */
+	clientlist->ncli = 0;
+	clientlist->status &= ~(ESP_AT_STATUS_CLIENT_CONNECTED |
+				ESP_AT_STATUS_AS_CLIENT);
+
+	for (unsigned int i = 0; i < rsp.nlines; ++i) {
+		esp_at_clients *cptr;
+		const char *preamble = rsp.tokenlists[i].preamble;
+		at_rsp_tk *tkptr;
+		char proto[6] = {'\0'};
+
+		DEBUGDATA("CIPSTATUS line", i, "%u");
+		DEBUGDATA("Preamble", preamble, "%s");
+
+		tkptr = rsp.tokenlists[i].tokenlist;
+
+		if (strcmp(preamble, "+CIPSTATUS") != 0) {
+			DEBUGDATA("Doesn't match +CIPSTATUS",
+				  i, "%u");
+			continue;
+		}
+
+		cptr = &clientlist->cli[clientlist->ncli];
+		cptr->index = at_rsp_token_as_int(&tkptr[0]);
+		DEBUGDATA("Working on index", cptr->index, "%d");
+
+		/* protocol requires furthur processing
+		 * later */
+		strncpy(proto, at_rsp_token_as_str(&tkptr[1]),
+			ARRAY_LEN(proto) - 1);
+
+		strncpy(cptr->ipv4,
+			at_rsp_token_as_str(&tkptr[2]),
+			sizeof(cptr->ipv4) - 1);
+		cptr->r_port = at_rsp_token_as_int(&tkptr[3]);
+		cptr->l_port = at_rsp_token_as_int(&tkptr[4]);
+		cptr->passive = at_rsp_token_as_int(&tkptr[5]);
+
+		if (cptr->passive) {
+			clientlist->status |= ESP_AT_STATUS_CLIENT_CONNECTED;
+		} else {
+			clientlist->status |= ESP_AT_STATUS_AS_CLIENT;
+		}
+
+		/* This is the furthur processing for
+		 * protocol */
+		if (strcmp(proto, "TCP") == 0) {
+			cptr->proto = ESP_AT_CIP_PROTO_TCP;
+		} else if (strcmp(proto, "UDP") == 0) {
+			cptr->proto = ESP_AT_CIP_PROTO_UDP;
+		} else if (strcmp(proto, "SSL") == 0) {
+			cptr->proto = ESP_AT_CIP_PROTO_SSL;
+		} else {
+			cptr->proto = ESP_AT_CIP_PROTO_NULL;
+		}
+
+		++clientlist->ncli;
+	}
+
+	return 0;
+}
+
+int _esp_check_cipmux(esp_at_status *clientlist)
+{
+	int ret;
+	at_rsp_lines rsp;
+	at_rsp_tk *value;
+	esp_at_status_byte *status = &clientlist->status;
+
+	/* Query specific server parameters */
+	ret = _esp_query("AT+CIPMUX?", &rsp);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	value = &at_rsp_get_property("+CIPMUX", &rsp)->tokenlist[0];
+
+	if (at_rsp_token_as_int(value)) {
+		*status |= ESP_AT_STATUS_CIPMUX_ON;
+	} else {
+		*status &= ~ESP_AT_STATUS_CIPMUX_ON;
+	}
+
+	return 0;
+}
+
