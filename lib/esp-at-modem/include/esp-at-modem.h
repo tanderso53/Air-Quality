@@ -10,6 +10,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/**
+ * @defgroup espatlibrary RPi Pico ESP-AT WiFi Library
+ * @{
+ */
+
 #ifndef ESP_AT_MAX_CONN
 #define ESP_AT_MAX_CONN 8
 #endif
@@ -164,5 +169,9 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len);
  * interpreter receives the 'exit' command.
  */
 void esp_at_passthrough();
+
+/**
+ * @}
+ */
 
 #endif /* #ifndef ESP_AT_MODEM_H */

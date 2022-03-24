@@ -5,6 +5,10 @@ project(esp-at-modem)
 add_subdirectory(
   ${CMAKE_CURRENT_LIST_DIR}/lib)
 
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/builddoxygendocs.cmake)
+
+builddoxygendocs(ESP_AT)
+
 add_library(esp-at-modem INTERFACE)
 
 target_sources(esp-at-modem INTERFACE
