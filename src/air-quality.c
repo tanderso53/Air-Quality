@@ -112,7 +112,7 @@ void aq_nprintf(const char * restrict format, ...)
 
 	va_end(ap);
 
-	printf(s);
+	printf("%s", s);
 
 	if (op_reg & AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED) {
 		DEBUGDATA("Attempting to write WiFi", s, "%s");
@@ -505,7 +505,7 @@ void aq_adc_init()
 
 double aq_batt_voltage()
 {
-	const double cf = 2 * 3.3d / (1 << 12);
+	const double cf = 2 * 3.3 / (1 << 12);
 	adc_select_input(AIR_QUALITY_ADC_BATT_ADC_CH);
 
 	return cf * (double) adc_read();
