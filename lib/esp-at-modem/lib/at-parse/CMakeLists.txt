@@ -5,6 +5,14 @@ project(at-parse)
 option(AT_PARSE_BUILD_TESTS
   "Build tests for AT Response Parsing library"
   OFF)
+option(AT_PARSE_BUILD_DOCS
+  "Build documentation for AT Response Parsing Library"
+  OFF)
+
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/builddoxygendocs.cmake)
+
+# Build docs if AT_PARSE_BUILD_DOCS is ON
+builddoxygendocs(AT_PARSE)
 
 add_library(at-parse INTERFACE)
 
