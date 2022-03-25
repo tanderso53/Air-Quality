@@ -1,7 +1,10 @@
 ######################################################################
 #                                                                    #
 #                                                                    #
-#         AT Parsing Library Documentation Build Config              #
+#                Library Documentation Build Config                  #
+#                          For CMake                                 #
+#                                                                    #
+#                      By Tyler J. Anderson                          #
 #                                                                    #
 #                                                                    #
 ######################################################################
