@@ -60,6 +60,7 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	/* Enable fan power module */
 	_pm2_5_fan_power_gpio_setup();
 	_pm2_5_fan_power_set_enabled(true);
+	sleep_ms(500); /* Make sure powered before initializing */
 
 	/* Initialize the uart interface */
 	uart_init(intf->uart, PM2_5_DEFAULT_BAUD);
