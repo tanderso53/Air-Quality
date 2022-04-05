@@ -6,6 +6,7 @@
 #include "esp-at-modem.h"
 #include "ws2812.pio.h"
 #include "debugmsg.h"
+#include "aq-error-state.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -14,10 +15,6 @@
 
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
-
-#ifndef AIR_QUALITY_STATUS_LED
-#define AIR_QUALITY_STATUS_LED 24
-#endif
 
 #ifndef AIR_QUALITY_INFO_LED_PIN
 #define AIR_QUALITY_INFO_LED_PIN 16
@@ -43,6 +40,10 @@
 #define AIR_QUALITY_ADC_BATT_ADC_CH 2
 #endif
 
+#ifndef AIR_QUALITY_BATT_LOW_V
+#define AIR_QUALITY_BATT_LOW_V ((double) 3.60)
+#endif
+
 #ifndef PICO_BOARD
 #define PICO_BOARD "unknown"
 #endif
@@ -50,10 +51,6 @@
 #ifndef PICO_TARGET_NAME
 #define PICO_TARGET_NAME "unknown"
 #endif
-
-/* Operational Flags */
-#define AIR_QUALITY_OP_FLAG_WIFI_ON 0x0001
-#define AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED 0x0002
 
 /* Useful local macros */
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
@@ -64,33 +61,24 @@
 **********************************************************************
 */
 
-typedef struct {
-	absolute_time_t lastblink;
-	uint8_t laststate;
-	int16_t blink_delay; /* in ms */
-} air_quality_led_config;
-
-static uint16_t op_reg = 0; /**< @brief Operational Register */
+static uint32_t *op_reg = NULL; /**< @brief Operational Register */
 
 static esp_at_status aq_wifi_status;
-
-/** @brief Print errors to stdout when things go wrong */
-void air_quality_handle_error(int16_t);
 
 /** @brief Print out data from environmental sensors as json string
  * @p d Data struct from bme68x vendor library
  */
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis);
 
-static void init_info_led();
+static void aq_bme680_handle_error(int8_t i_errno, aq_status *s);
 
-static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b);
+static void aq_bme280_handle_error(int8_t i_errno, aq_status *s);
 
-static int32_t aq_read_raw_humidity(bme680_intf *b_intf);
+static void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s);
 
 static void aq_nprintf(const char * restrict format, ...);
 
-static void aq_wifi_set_flags();
+static void aq_wifi_set_flags(aq_status *s);
 
 static uint16_t aq_abrev_netmask(const char *nm);
 
@@ -114,22 +102,11 @@ void aq_nprintf(const char * restrict format, ...)
 
 	printf("%s", s);
 
-	if (op_reg & AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED) {
+	if (*op_reg & AQ_STATUS_I_CLIENT_CONNECTED) {
 		DEBUGDATA("Attempting to write WiFi", s, "%s");
 		esp_at_cipsend_string(s, sizeof(s), &aq_wifi_status);
 	}
 	
-}
-
-void air_quality_handle_error(int16_t err)
-{
-	printf("There was an error %d\n", err);
-
-	if (err > 0) {
-		write_info_led_color(50, 50, 0);
-	} else if (err < 0) {
-		write_info_led_color(75, 0, 0);
-	}
 }
 
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
@@ -157,113 +134,12 @@ void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 	aq_nprintf("{\"name\": \"gas resistance\", "
 		   "\"value\": %.2f, "
 		   "\"unit\": \"ul\", "
-		   "\"timemillis\": %lu}], ", 
+		   "\"timemillis\": %lu}], ",
 		   d->gas_resistance, (unsigned long) millis);
 
 	aq_nprintf("\"status\": {"
 		   "\"sensor\": \"%#x\"}}",
 		   d->status);
-}
-
-void air_quality_status_led_init(air_quality_led_config *conf,
-				 int16_t blink_delay)
-{
-	gpio_init(AIR_QUALITY_STATUS_LED);
-	gpio_set_dir(AIR_QUALITY_STATUS_LED, GPIO_OUT);
-	gpio_put(AIR_QUALITY_STATUS_LED, 0);
-
-	conf->lastblink = 0;
-	conf->laststate = 0;
-	conf->blink_delay = blink_delay;
-}
-
-uint8_t air_quality_status_led_test_state(air_quality_led_config *conf)
-{
-	absolute_time_t time_from;
-	absolute_time_t time_to;
-
-	time_from = conf->lastblink;
-	time_to = delayed_by_ms(conf->lastblink, conf->blink_delay);
-
-	if (absolute_time_diff_us(time_from, time_to) > 0) {
-		return 1;
-	}
-
-	return 0;
-}
-
-void air_quality_status_led_on(air_quality_led_config *conf)
-{
-	if (conf->blink_delay < 0) {
-		gpio_put(AIR_QUALITY_STATUS_LED, 1);
-		conf->laststate = 1;
-		conf->lastblink = get_absolute_time();
-		return;
-	}
-
-	if (air_quality_status_led_test_state(conf)) {
-
-		if (conf->laststate) {
-			gpio_put(AIR_QUALITY_STATUS_LED, 0);
-			conf->laststate = 0;
-		} else {
-			gpio_put(AIR_QUALITY_STATUS_LED, 1);
-			conf->laststate = 1;
-		}
-
-		conf->lastblink = get_absolute_time();
-		return;
-	}
-}
-
-void air_quality_status_led_off(air_quality_led_config *conf)
-{
-	gpio_put(AIR_QUALITY_STATUS_LED, 0);
-	conf->laststate = 0;
-	conf->lastblink = get_absolute_time();
-}
-
-static void init_info_led()
-{
-	ws2812_program_init(pio0, 0, pio_add_program(pio0, &ws2812_program),
-			    AIR_QUALITY_INFO_LED_PIN, 800000, false);
-}
-
-static void write_info_led_color(uint8_t r, uint8_t g, uint8_t b)
-{
-	uint32_t urgb;
-
-	/* Load int 32u bit int ordered g, r, b left to right */
-	urgb = ((uint32_t) (r) << 8) | ((uint32_t) (g) << 16) | (uint32_t) (b);
-
-	pio_sm_put_blocking(pio0, 0, urgb << 8u); /* RGB value only 24 bit */
-
-	/* Note: this function will block if pio buffer is full */
-}
-
-static int32_t aq_read_raw_humidity(bme680_intf *b_intf)
-{
-	const uint8_t st_addr = 0x25;
-	const uint8_t len = 2;
-	int32_t ret;
-	uint32_t rst = 0;
-	uint8_t d[] = {0x00, 0x00};
-
-	if (b_intf == NULL) {
-		return -13;
-	}
-
-	ret = bme68x_get_regs(st_addr, d, len, &b_intf->bme_dev);
-
-	if (ret < 0) {
-		return ret;
-	}
-
-	for (uint8_t i = 0; i < len; i++) {
-		rst = rst | ((uint32_t) d[i] << i * 8);
-	}
-
-	return (int32_t) rst;
 }
 
 static int8_t aq_bme280_init(bme280_intf *b_intf)
@@ -377,7 +253,7 @@ int8_t aq_bme280_sample(bme280_intf *b_intf)
 				      &b_intf->dev);
 
 	if (rslt != BME280_OK) {
-		return -3;
+		return rslt;
 	}
 
 	return 0;
@@ -409,10 +285,14 @@ void aq_bme280_print_data(bme280_intf *b_intf, unsigned long millis)
 		   d->humidity, millis);
 }
 
-void aq_bme280_handle_error(int8_t i_errno)
+void aq_bme280_handle_error(int8_t i_errno, aq_status *s)
 {
 	char level[16];
 	if (i_errno == BME280_OK) {
+		/* All errors/warnings will clear on successful
+		 * library operation */
+		aq_status_unset_status(AQ_STATUS_REGION_BME280 ^
+				       AQ_STATUS_I_BME280_READING, s);
 		return;
 	}
 
@@ -422,11 +302,15 @@ void aq_bme280_handle_error(int8_t i_errno)
 		break;
 	case WARNING:
 		strcpy(level, "WARNING");
-		write_info_led_color(50, 50, 0);
+
+		/* Currently the only warning enumerated for BME280 */
+		aq_status_set_status(AQ_STATUS_W_BME280_OSR_INVALID, s);
 		break;
 	case ERROR:
 		strcpy(level, "ERROR");
-		write_info_led_color(50, 0, 0);
+		/* BME280 will be removed when VOCs are working, so
+		 * don't worry about enumerating errors furthur */
+		aq_status_set_status(AQ_STATUS_E_BME280_GENERAL_FAIL, s);
 		break;
 	default:
 		strcpy(level, "UNKNOWN");
@@ -435,6 +319,25 @@ void aq_bme280_handle_error(int8_t i_errno)
 
 	printf("%s: %s\n", level,
 	       bme280_iface_err_description(i_errno));
+}
+
+void aq_bme680_handle_error(int8_t i_errno, aq_status *s)
+{
+	switch (i_errno) {
+	case BME68X_OK:
+		aq_status_unset_status(AQ_STATUS_REGION_BME680 ^
+				       AQ_STATUS_I_BME680_READING,
+				       s);
+		break;
+	case BME68X_E_COM_FAIL:
+		aq_status_set_status(AQ_STATUS_E_BME680_COMM_FAIL,
+				     s);
+		break;
+	default:
+		aq_status_set_status(AQ_STATUS_E_BME680_GENERAL_FAIL,
+				     s);
+		break;
+	}
 }
 
 void aq_pm2_5_print_data(pm2_5_dev *dev, pm2_5_data *d,
@@ -504,10 +407,14 @@ void aq_pm2_5_print_data(pm2_5_dev *dev, pm2_5_data *d,
 		    dev->sleep ? "true" : "false");
 }
 
-void aq_pm2_5_handle_error(int8_t i_errno)
+void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s)
 {
 	char level[16];
 	if (i_errno == BME280_OK) {
+		/* All errors/warnings will clear on successful
+		 * library operation */
+		aq_status_unset_status(AQ_STATUS_REGION_PM2_5 ^
+				       AQ_STATUS_I_PM2_5_READING, s);
 		return;
 	}
 
@@ -517,11 +424,11 @@ void aq_pm2_5_handle_error(int8_t i_errno)
 		break;
 	case PM2_5_WARNING:
 		strcpy(level, "WARNING");
-		write_info_led_color(50, 50, 0);
+		aq_status_set_status(AQ_STATUS_W_PM2_5_NO_DATA, s);
 		break;
 	case PM2_5_ERROR:
 		strcpy(level, "ERROR");
-		write_info_led_color(50, 0, 0);
+		aq_status_set_status(AQ_STATUS_E_PM2_5_GENERAL_FAIL, s);
 		break;
 	default:
 		strcpy(level, "UNKNOWN");
@@ -539,15 +446,24 @@ void aq_adc_init()
 	adc_gpio_init(AIR_QUALITY_ADC_BATT_GPIO_PIN);
 }
 
-double aq_batt_voltage()
+double aq_batt_voltage(aq_status *s)
 {
+	double vbatt;
 	const double cf = 2 * 3.3 / (1 << 12);
-	adc_select_input(AIR_QUALITY_ADC_BATT_ADC_CH);
 
-	return cf * (double) adc_read();
+	adc_select_input(AIR_QUALITY_ADC_BATT_ADC_CH);
+	vbatt = cf * (double) adc_read();
+
+	if (vbatt < AIR_QUALITY_BATT_LOW_V) {
+		aq_status_set_status(AQ_STATUS_W_BATT_LOW, s);
+	} else {
+		aq_status_unset_status(AQ_STATUS_W_BATT_LOW, s);
+	}
+
+	return vbatt;
 }
 
-void aq_print_batt()
+void aq_print_batt(aq_status *s)
 {
 	aq_nprintf("{\"sensor\": \"Board\", "
 		   "\"data\": [");
@@ -556,7 +472,7 @@ void aq_print_batt()
 		   "\"value\": %0.2f, "
 		   "\"unit\": \"V\", "
 		   "\"timemillis\": %lu}], ",
-		   aq_batt_voltage(),
+		   aq_batt_voltage(s),
 		   to_ms_since_boot(get_absolute_time()));
 
 	aq_nprintf("\"status\": {"
@@ -564,20 +480,23 @@ void aq_print_batt()
 		   "unknown");
 }
 
-void aq_wifi_set_flags()
+void aq_wifi_set_flags(aq_status *s)
 {
 	int rslt;
 
 	rslt = esp_at_cipstatus(&aq_wifi_status);
 
 	if (rslt) {
-		op_reg &= ~(AIR_QUALITY_OP_FLAG_WIFI_ON |
-			    AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED);
+		aq_status_set_status(AQ_STATUS_E_WIFI_FAIL |
+				     AQ_STATUS_W_WIFI_DISCONNECTED, s);
+		aq_status_unset_status(AQ_STATUS_I_CLIENT_CONNECTED, s);
 
 		DEBUGDATA("esp_at_cipstatus() failed with status",
 			  rslt, "%d");
 
 		return;
+	} else {
+		aq_status_unset_status(AQ_STATUS_E_WIFI_FAIL, s);
 	}
 
 	DEBUGDATA("Checking wifi status:", aq_wifi_status.status,
@@ -586,15 +505,15 @@ void aq_wifi_set_flags()
 	/* need to know if clients are connected so we
 	 * don't waste time writing to them */
 	if (aq_wifi_status.status & ESP_AT_STATUS_CLIENT_CONNECTED) {
-		op_reg |= AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED;
+		aq_status_set_status(AQ_STATUS_I_CLIENT_CONNECTED, s);
 	} else {
-		op_reg &= ~AIR_QUALITY_OP_FLAG_CLIENT_CONNECTED;
+		aq_status_unset_status(AQ_STATUS_I_CLIENT_CONNECTED, s);
 	}
 
 	if (aq_wifi_status.status & ESP_AT_STATUS_WIFI_CONNECTED) {
-		op_reg |= AIR_QUALITY_OP_FLAG_WIFI_ON;
+		aq_status_unset_status(AQ_STATUS_W_WIFI_DISCONNECTED, s);
 	} else {
-		op_reg &= ~AIR_QUALITY_OP_FLAG_WIFI_ON;
+		aq_status_set_status(AQ_STATUS_W_WIFI_DISCONNECTED, s);
 	}
 }
 
@@ -647,6 +566,11 @@ int main() {
 	bme680_intf b_intf;
 	bme280_intf b280_intf;
 	pm2_5_intf p_intf;
+	aq_status status = {
+		.led_pio = pio0,
+		.led_sm = 0,
+		.led_pin = AIR_QUALITY_INFO_LED_PIN
+	};
 
 	/* Output Data Structures */
 	struct bme68x_data d;
@@ -654,33 +578,28 @@ int main() {
 
 	/* Configuration Parameters */
 	bme680_run_mode m = FORCED_MODE;
-	air_quality_led_config led_conf;
 	const uint16_t sample_delay_ms = 10000;
 	absolute_time_t next_sample_time;
 
 	stdio_usb_init();
 
-	init_info_led();
-	write_info_led_color(0, 75, 0);
+	aq_status_init(&status);
+	op_reg = &status.status;
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
 	for (;;) {
-
-		write_info_led_color(0, 0, 25);
+		aq_status_set_status(AQ_STATUS_U_REQ_USB, &status);
 
 		if (stdio_usb_connected()) {
 			printf("Welcome! You are connected!\n");
-			write_info_led_color(0, 75, 0);
+			aq_status_unset_status(AQ_STATUS_U_REQ_USB,
+					       &status);
 			break;
 		}
 
 		sleep_ms(100);
 	}
 #endif /* AIR_QUALITY_WAIT_CONNECTION */
-
-	/* Turn on status LED */
-	air_quality_status_led_init(&led_conf, -1);
-	/*air_quality_status_led_on(&led_conf);*/
 
 	/* initialize variables in interface struct */
 	b_intf.i2c = NULL; /* NULL i2c will select default */
@@ -697,11 +616,11 @@ int main() {
 	} else if (ret > 0) {
 		printf("BME680 Selftest WARNING with code %d...Continuing...\n",
 		       ret);
-		write_info_led_color(50, 50, 0);
 	} else {
 		printf("BME680 Selftest FAILURE with code %d...Ending...\n",
 			ret);
-		write_info_led_color(75, 0, 0);
+		aq_status_set_status(AQ_STATUS_E_BME680_SELFTEST_FAIL,
+				     &status);
 		return 1;
 	}
 #endif /* #ifdef BME680_INTERFACE_SELFTEST */
@@ -711,23 +630,34 @@ int main() {
 
 	/* Initialize WiFi Module */
 	if (esp_at_init_module() == 0) {
-		op_reg |= AIR_QUALITY_OP_FLAG_WIFI_ON;
+		aq_status_unset_status(AQ_STATUS_W_WIFI_DISCONNECTED,
+				       &status);
 	} else {
+		aq_status_set_status(AQ_STATUS_W_WIFI_DISCONNECTED |
+				     AQ_STATUS_E_WIFI_FAIL, &status);
 		printf("ERROR: Failed to intitialize WiFi module\n");
 	}
 
-	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON) {
+	if (status.status & ~AQ_STATUS_W_WIFI_DISCONNECTED) {
 		ret = esp_at_cipserver_init();
 
 		if (ret < 0) {
 			printf("Error: Could not initialize WiFi server\n");
-			op_reg &= ~AIR_QUALITY_OP_FLAG_WIFI_ON;
+			aq_status_set_status(AQ_STATUS_W_WIFI_DISCONNECTED,
+					     &status);
+		} else {
+			aq_status_unset_status(AQ_STATUS_E_WIFI_FAIL,
+					       &status);
 		}
 	}
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
-	if (op_reg & AIR_QUALITY_OP_FLAG_WIFI_ON) {
+	if (*op_reg & ~AQ_STATUS_W_WIFI_DISCONNECTED) {
+		aq_status_set_status(AQ_STATUS_U_REQ_USER_INPUT,
+				     &status);
 		esp_at_passthrough();
+		aq_status_unset_status(AQ_STATUS_U_REQ_USER_INPUT,
+				       &status);
 	}
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
@@ -736,11 +666,12 @@ int main() {
 	for (;;) {
 		ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
 
+		aq_bme680_handle_error(ret, &status);
+
 		if (ret >= 0) {
 			break;
 		}
 
-		air_quality_handle_error(ret);
 		sleep_ms(1000);
 	}
 
@@ -748,22 +679,20 @@ int main() {
 
 	/* Start BME280 */
 	ret = aq_bme280_init(&b280_intf);
-	aq_bme280_handle_error(ret);
+	aq_bme280_handle_error(ret, &status);
 
 	ret = aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
-	aq_bme280_handle_error(ret);
+	aq_bme280_handle_error(ret, &status);
 
 	/* Start PM2_5 Sensor */
 	p_intf.uart = AIR_QUALITY_PM2_5_UART;
 	ret = pm2_5_intf_init(&p_intf, AIR_QUALITY_PM2_5_TX_PIN,
 			      AIR_QUALITY_PM2_5_RX_PIN);
-	aq_pm2_5_handle_error(ret);
+	aq_pm2_5_handle_error(ret, &status);
 
 	ret = pm2_5_set_mode(&p_intf.dev, PM2_5_MODE_PASSIVE);
-	aq_pm2_5_handle_error(ret);
+	aq_pm2_5_handle_error(ret, &status);
 
-	/* Set status led */
-	air_quality_status_led_init(&led_conf, 2000);
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
 
 	/* Keep polling the sensor for data if initialization was
@@ -772,33 +701,51 @@ int main() {
 		absolute_time_t readtime;
 		uint8_t print_pm = 0;
 
-		air_quality_status_led_on(&led_conf);
-
-		if (absolute_time_diff_us(next_sample_time, get_absolute_time()) < 0) {
+		if (absolute_time_diff_us(next_sample_time,
+					  get_absolute_time()) < 0) {
 			continue;
 		}
 
 		/* Check wifi */
-		aq_wifi_set_flags();
+		aq_wifi_set_flags(&status);
 
+		aq_status_set_status(AQ_STATUS_I_BME680_READING,
+				     &status);
 		ret = sample_bme680_sensor(m, &b_intf, &d);
+
+		/* Get time before handling error so it's as close as
+		 * possible */
 		readtime = get_absolute_time();
 		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
+
+		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
+				       &status);
+
+		aq_bme680_handle_error(ret, &status);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
 			continue;
 		}
 
 		if (ret < 0) {
-			air_quality_handle_error(ret);
 			break;
 		}
 
+		/* BME280 READ */
+		aq_status_set_status(AQ_STATUS_I_BME680_READING,
+				     &status);
 		ret = aq_bme280_sample(&b280_intf);
-		aq_bme280_handle_error(ret);
+		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
+				       &status);
+		aq_bme280_handle_error(ret, &status);
 
+		/* PM2.5 READ */
+		aq_status_set_status(AQ_STATUS_I_PM2_5_READING,
+				     &status);
 		ret = pm2_5_get_data(&p_intf.dev, &pdata);
-		aq_pm2_5_handle_error(ret);
+		aq_status_unset_status(AQ_STATUS_I_PM2_5_READING,
+				       &status);
+		aq_pm2_5_handle_error(ret, &status);
 		print_pm = ret == 0 ? 1 : 0;
 
 		/* Print out all the data */
@@ -806,11 +753,11 @@ int main() {
 			   "\"status\": %u, "
 			   "\"ip address\": \"%s/%d\", "
 			   "\"output\": [",
-			   PICO_TARGET_NAME, PICO_BOARD, op_reg,
+			   PICO_TARGET_NAME, PICO_BOARD, status.status,
 			   aq_wifi_status.ipv4,
 			   aq_abrev_netmask(aq_wifi_status.ipv4_netmask));
 
-		aq_print_batt();
+		aq_print_batt(&status);
 
 		aq_nprintf(", ");
 
@@ -832,7 +779,6 @@ int main() {
 
 	/* Deinit i2c if loop broke */
 	deinit_bme680_sensor(&b_intf);
-	air_quality_status_led_off(&led_conf);
 	pm2_5_intf_deinit(&p_intf);
 
 	return 1;

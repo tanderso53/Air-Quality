@@ -32,8 +32,9 @@ add_executable(air-quality)
 pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 target_sources(air-quality PRIVATE
-  src/air-quality.c
-  src/ws2812.pio
+  ${CMAKE_CURRENT_LIST_DIR}/src/air-quality.c
+  ${CMAKE_CURRENT_LIST_DIR}/src/aq-error-state.c
+  ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
   )
 
 pico_enable_stdio_usb(air-quality 1)
