@@ -22,35 +22,9 @@ option(AIR_QUALITY_LOG_LEVEL_DEBUG "Enable debug messages to stdout"
 
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/lib)
 
-###########################################
-# Add in vendor library for BME680/BME688 #
-###########################################
-
-add_library(bme68x-sensor-api INTERFACE)
-
-target_sources(bme68x-sensor-api INTERFACE
-  ${CMAKE_CURRENT_LIST_DIR}/BME68x-Sensor-API/bme68x.c)
-
-target_include_directories(bme68x-sensor-api INTERFACE
-  ${CMAKE_CURRENT_LIST_DIR}/BME68x-Sensor-API)
-
-#############################
-# BME280 Vendor API Library #
-#############################
-
-add_library(bme280-driver INTERFACE)
-
-target_sources(bme280-driver INTERFACE
-  ${CMAKE_CURRENT_LIST_DIR}/BME280_driver/bme280.c)
-
-target_include_directories(bme280-driver INTERFACE
-  ${CMAKE_CURRENT_LIST_DIR}/BME280_driver)
-
 ################################
 # Main air-quality MCU program #
 ################################
-
-include(${CMAKE_CURRENT_LIST_DIR}/pm2_5-interface.cmake)
 
 add_executable(air-quality)
 
@@ -59,8 +33,6 @@ pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 
 target_sources(air-quality PRIVATE
   src/air-quality.c
-  src/bme680-interface.c
-  src/bme280-interface.c
   src/ws2812.pio
   )
 
@@ -68,7 +40,7 @@ pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
-  hardware_uart bme68x-sensor-api bme280-driver pm2_5-sensor-interface
+  hardware_uart bme280-interface bme680-interface pm2_5-sensor-interface 
   hardware_adc esp-at-modem debugmsg)
 
 if(AIR_QUALITY_SELF_TEST)
