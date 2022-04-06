@@ -639,19 +639,8 @@ int main() {
 	}
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
-	/* Keep trying to connect to sensor until there is a
-	 * success */
-	for (;;) {
-		ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
-
-		aq_bme680_handle_error(ret, &status);
-
-		if (ret >= 0) {
-			break;
-		}
-
-		sleep_ms(1000);
-	}
+	ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
+	aq_bme680_handle_error(ret, &status);
 
 	aq_hack_bme680(); /* Somehow this fixes bad data on BME680 */
 
