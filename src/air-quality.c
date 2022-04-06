@@ -7,6 +7,7 @@
 #include "ws2812.pio.h"
 #include "debugmsg.h"
 #include "aq-error-state.h"
+#include "aq-stdio.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -76,8 +77,6 @@ static void aq_bme280_handle_error(int8_t i_errno, aq_status *s);
 
 static void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s);
 
-static void aq_nprintf(const char * restrict format, ...);
-
 static void aq_wifi_set_flags(aq_status *s);
 
 static uint16_t aq_abrev_netmask(const char *nm);
@@ -87,27 +86,6 @@ static uint16_t aq_abrev_netmask(const char *nm);
 ********************** PROGRAM IMPLEMENTATIONS ***********************
 **********************************************************************
 */
-
-void aq_nprintf(const char * restrict format, ...)
-{
-	char s[512];
-	va_list ap;
-
-	va_start(ap, format);
-
-	vsnprintf(s, sizeof(s) - 1, format, ap);
-	s[ARRAY_LEN(s) - 1] = '\0';
-
-	va_end(ap);
-
-	printf("%s", s);
-
-	if (*op_reg & AQ_STATUS_I_CLIENT_CONNECTED) {
-		DEBUGDATA("Attempting to write WiFi", s, "%s");
-		esp_at_cipsend_string(s, sizeof(s), &aq_wifi_status);
-	}
-	
-}
 
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 {
@@ -695,6 +673,9 @@ int main() {
 
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
 
+	/* Initialize stdio processing thread */
+	aq_stdio_init(&status, &aq_wifi_status);
+
 	/* Keep polling the sensor for data if initialization was
 	 * successful. This loop will only break on error. */
 	for (;;) {
@@ -775,6 +756,9 @@ int main() {
 		}
 
 		aq_nprintf("]}\n");
+
+		/* Help second core process any leftover stdio */
+		aq_stdio_process();
 	}
 
 	/* Deinit i2c if loop broke */

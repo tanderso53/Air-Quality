@@ -26,4 +26,5 @@ target_include_directories(esp-at-modem INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_link_libraries(esp-at-modem INTERFACE
-  at-parse pico_stdlib hardware_pio debugmsg)
+  at-parse pico_stdlib hardware_pio debugmsg
+  pico_multicore)

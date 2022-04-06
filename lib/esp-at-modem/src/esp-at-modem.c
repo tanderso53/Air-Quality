@@ -38,6 +38,8 @@
  * library
  */
 
+#define ESP_AT_MULTICORE_ENABLED
+
 #include "esp-at-modem.h"
 #include "at-parse.h"
 #include "debugmsg.h"
@@ -51,12 +53,19 @@
 #include <limits.h>
 
 #include "pico/stdlib.h"
+#ifdef ESP_AT_MULTICORE_ENABLED
+#include "pico/multicore.h"
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 #define _ESP_EN_DELAY_US 500000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+static mutex_t _exp_mtx;
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 static int _esp_query(const char * cmd, at_rsp_lines *rsp);
 
@@ -77,6 +86,10 @@ int esp_at_init_module()
 	char rxbuf[rxlen];
 
 	DEBUGMSG("Initializing WiFi");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	mutex_init(&_exp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 	/* Initialize gpio pins for enable and reset */
 	_esp_en_gpio_setup();
@@ -182,6 +195,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 {
 	DEBUGDATA("Sending AT command", cmd, "%s");
 
+#ifdef ESP_AT_MULTICORE_ENABLED
+	mutex_enter_blocking(&_exp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+
 	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
 			     cmd);
 
@@ -209,6 +226,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 				DEBUGDATA("Received AT response OK for command",
 					  cmd, "%s");
 
+#ifdef ESP_AT_MULTICORE_ENABLED
+				mutex_exit(&_exp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+
 				return 0;
 			}
 
@@ -220,6 +241,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 
 				DEBUGDATA("Received AT response ERROR for command",
 					  cmd, "%s");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+				mutex_exit(&_exp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 			
 				return -1;
 			}
@@ -232,6 +257,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 
 	DEBUGDATA("Received no AT response before buffer filled command",
 		  cmd, "%s");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	mutex_exit(&_exp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 	return len;
 }
