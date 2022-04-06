@@ -5,6 +5,8 @@
  */
 
 #include "aq-error-state.h"
+#include "debugmsg.h"
+#include <stdio.h>
 
 static void _aq_status_set_led(aq_status *s);
 
@@ -28,6 +30,8 @@ void aq_status_write_color(uint32_t rgb, aq_status *s)
 	uint32_t g;
 	uint32_t b;
 
+	DEBUGDATA("Setting RGB:", rgb, "%#lx");
+
 	/* Don't bother if the LED color won't change */
 	if (rgb == s->led_rgb)
 		return;
@@ -46,6 +50,7 @@ void aq_status_write_color(uint32_t rgb, aq_status *s)
 	/** @note This function will block if pio buffer is full */
 
 	s->led_rgb = rgb;
+	DEBUGDATA("New LED", s->led_rgb, "%#lx");
 }
 
 void aq_status_set_status(STATUS_TYPE status, aq_status *s)
@@ -68,6 +73,15 @@ void aq_status_clear(aq_status *s)
 
 void _aq_status_set_led(aq_status *s)
 {
+	DEBUGDATA("lastled:", s->led_rgb, "%#lx");
+	DEBUGDATA("Status:", s->status, "%#lx");
+	DEBUGDATA("Wait mask:", s->status & AQ_STATUS_MASK_WAIT, "%#lx");
+
+	if (s->status & AQ_STATUS_MASK_WAIT) {
+		aq_status_write_color(AQ_STATUS_COLOR_WAIT, s);
+		return;
+	}
+
 	if (s->status & AQ_STATUS_MASK_ERROR) {
 		aq_status_write_color(AQ_STATUS_COLOR_ERROR, s);
 		return;

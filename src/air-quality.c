@@ -638,7 +638,7 @@ int main() {
 		printf("ERROR: Failed to intitialize WiFi module\n");
 	}
 
-	if (status.status & ~AQ_STATUS_W_WIFI_DISCONNECTED) {
+	if (!(status.status & AQ_STATUS_W_WIFI_DISCONNECTED)) {
 		ret = esp_at_cipserver_init();
 
 		if (ret < 0) {
@@ -652,7 +652,7 @@ int main() {
 	}
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
-	if (*op_reg & ~AQ_STATUS_W_WIFI_DISCONNECTED) {
+	if (!(status.status & AQ_STATUS_W_WIFI_DISCONNECTED)) {
 		aq_status_set_status(AQ_STATUS_U_REQ_USER_INPUT,
 				     &status);
 		esp_at_passthrough();
@@ -750,7 +750,7 @@ int main() {
 
 		/* Print out all the data */
 		aq_nprintf("{\"program\": \"%s\", \"board\": \"%s\", "
-			   "\"status\": %u, "
+			   "\"status\": %lu, "
 			   "\"ip address\": \"%s/%d\", "
 			   "\"output\": [",
 			   PICO_TARGET_NAME, PICO_BOARD, status.status,
