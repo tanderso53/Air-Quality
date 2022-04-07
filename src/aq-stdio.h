@@ -10,7 +10,7 @@
 #include "esp-at-modem.h"
 
 #ifndef AQ_STDIO_BUFFER_SIZE
-#define AQ_STDIO_BUFFER_SIZE 128
+#define AQ_STDIO_BUFFER_SIZE 256
 #endif /* #ifndef AQ_STDIO_BUFFER_SIZE */
 
 #ifndef AQ_STDIO_BUFFER_NUM

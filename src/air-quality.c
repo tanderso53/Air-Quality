@@ -8,6 +8,7 @@
 #include "debugmsg.h"
 #include "aq-error-state.h"
 #include "aq-stdio.h"
+#include "pico/multicore.h"
 
 #include <stdint.h>
 #include <stdio.h>

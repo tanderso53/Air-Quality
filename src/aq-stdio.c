@@ -47,10 +47,10 @@ void aq_stdio_init(aq_status *s, esp_at_status *e)
 
 	for (size_t i = 0; i < ARRAY_LEN(_buffers); ++i) {
 		/* One permit for UART, one for WiFi */
-		sem_init(&_buffers[i].sem, 0, 2);
+		sem_init(&_buffers[i].sem, 2, 2);
 	}
 
-	sem_init(&_sem, 0, AQ_STDIO_BUFFER_NUM);
+	sem_init(&_sem, AQ_STDIO_BUFFER_NUM, AQ_STDIO_BUFFER_NUM);
 
 	queue_init(&_q_tasks, sizeof(_aq_stdio_task),
 		   2 * AQ_STDIO_BUFFER_NUM);
@@ -96,11 +96,14 @@ _aq_iobuf *_aq_retrieve_buf()
 {
 	_aq_iobuf *ret = NULL;
 
+	DEBUGMSG("Acquiring buffer");
+
 	sem_acquire_blocking(&_sem);
 
 	for (size_t i = 0; i < ARRAY_LEN(_buffers); ++i) {
 		if (sem_available(&_buffers[i].sem) == 2) {
 			ret = &_buffers[i];
+			DEBUGDATA("Acquired buffer", i, "%u");
 			break;
 		}
 	}
@@ -121,8 +124,11 @@ bool _aq_release_buf(_aq_iobuf *buf)
 
 	if (sem_available(&buf->sem) == 2) {
 		sem_release(&_sem);
+		DEBUGMSG("Buffer fully released");
 		return true;
 	}
+
+	DEBUGMSG("Buffer partially released");
 
 	return false;
 }
@@ -136,7 +142,11 @@ void _aq_enqueue_uart(_aq_iobuf *buf)
 		.data = (void *) buf
 	};
 
+	DEBUGDATA("Adding to UART queue", buf->buf, "%s");
+
 	queue_add_blocking(&_q_tasks, &u_task);
+
+	DEBUGMSG("SUCCESS");
 }
 
 void _aq_enqueue_wifi(_aq_iobuf *buf)
@@ -148,7 +158,11 @@ void _aq_enqueue_wifi(_aq_iobuf *buf)
 		.data = (void*) buf
 	};
 
+	DEBUGDATA("Adding to WIFI queue", buf->buf, "%s");
+
 	queue_add_blocking(&_q_tasks, &w_task);
+
+	DEBUGMSG("SUCCESS");
 }
 
 void _aq_send_uart(void *buf)
@@ -156,6 +170,7 @@ void _aq_send_uart(void *buf)
 	_aq_iobuf *s = (_aq_iobuf*) buf;
 
 	printf("%s", s->buf);
+	DEBUGMSG("UART send complete, releasing buffer sem");
 	_aq_release_buf(s);
 }
 
@@ -169,11 +184,14 @@ void _aq_send_wifi(void *buf)
 				      _esp_s);
 	}
 
+	DEBUGMSG("WIFI send complete, releasing buffer sem");
 	_aq_release_buf(buf);
 }
 
 void _aq_stdio_thread_entry()
 {
+	DEBUGMSG("Entering CORE1");
+
 	for (;;) {
 		_aq_process_tasks();
 	}
@@ -201,6 +219,8 @@ void _aq_process_tasks()
 		if (!new->data && !old->data) {
 			break;
 		}
+
+		DEBUGMSG("Processing task");
 
 		/* Choose highest priority task */
 		if (old->data && (old->wait <= 0)) {
