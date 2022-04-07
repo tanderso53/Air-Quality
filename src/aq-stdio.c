@@ -136,7 +136,7 @@ bool _aq_release_buf(_aq_iobuf *buf)
 void _aq_enqueue_uart(_aq_iobuf *buf)
 {
 	_aq_stdio_task u_task = {
-		.priority = 1,
+		.priority = 3,
 		.wait = 2,
 		.task = _aq_send_uart,
 		.data = (void *) buf
@@ -152,7 +152,7 @@ void _aq_enqueue_uart(_aq_iobuf *buf)
 void _aq_enqueue_wifi(_aq_iobuf *buf)
 {
 	_aq_stdio_task w_task = {
-		.priority = 3,
+		.priority = 1, /* WiFi fails if lower priority */
 		.wait = 5,
 		.task = _aq_send_wifi,
 		.data = (void*) buf
@@ -169,7 +169,10 @@ void _aq_send_uart(void *buf)
 {
 	_aq_iobuf *s = (_aq_iobuf*) buf;
 
-	printf("%s", s->buf);
+	if (_aq_s->status & AQ_STATUS_I_USBCOMM_CONNECTED) {
+		printf("%s", s->buf);
+	}
+
 	DEBUGMSG("UART send complete, releasing buffer sem");
 	_aq_release_buf(s);
 }
@@ -232,7 +235,7 @@ void _aq_process_tasks()
 		} else if (old->data && !new->data) {
 			p = old;
 			no_p = new;
-		} else if (new->priority > old->priority) {
+		} else if (new->priority < old->priority) {
 			p = new;
 			no_p = old;
 

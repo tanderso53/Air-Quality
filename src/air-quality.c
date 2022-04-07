@@ -566,8 +566,9 @@ int main() {
 	op_reg = &status.status;
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
+	aq_status_set_status(AQ_STATUS_U_REQ_USB, &status);
+
 	for (;;) {
-		aq_status_set_status(AQ_STATUS_U_REQ_USB, &status);
 
 		if (stdio_usb_connected()) {
 			printf("Welcome! You are connected!\n");
@@ -675,6 +676,15 @@ int main() {
 		if (absolute_time_diff_us(next_sample_time,
 					  get_absolute_time()) < 0) {
 			continue;
+		}
+
+		/* Check USB STDIO */
+		if (stdio_usb_connected()) {
+			aq_status_set_status(AQ_STATUS_I_USBCOMM_CONNECTED,
+					     &status);
+		} else {
+			aq_status_unset_status(AQ_STATUS_I_USBCOMM_CONNECTED,
+					       &status);
 		}
 
 		/* Check wifi */
