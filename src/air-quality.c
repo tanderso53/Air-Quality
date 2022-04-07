@@ -673,11 +673,6 @@ int main() {
 		absolute_time_t readtime;
 		uint8_t print_pm = 0;
 
-		if (absolute_time_diff_us(next_sample_time,
-					  get_absolute_time()) < 0) {
-			continue;
-		}
-
 		/* Check USB STDIO */
 		if (stdio_usb_connected()) {
 			aq_status_set_status(AQ_STATUS_I_USBCOMM_CONNECTED,
@@ -697,7 +692,8 @@ int main() {
 		/* Get time before handling error so it's as close as
 		 * possible */
 		readtime = get_absolute_time();
-		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
+		next_sample_time = delayed_by_ms(next_sample_time,
+						 sample_delay_ms);
 
 		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
 				       &status);
@@ -755,10 +751,16 @@ int main() {
 					    to_ms_since_boot(readtime));
 		}
 
-		aq_nprintf("]}\n");
+		aq_nprintf("], \"sentmillis\": %lu}\n",
+			   to_ms_since_boot(get_absolute_time()));
 
 		/* Help second core process any leftover stdio */
 		aq_stdio_process();
+
+		/* Tell stdio core to sleep when done, and sleep this
+		 * core until next sample time */
+		aq_stdio_sleep_until(next_sample_time);
+		sleep_until(next_sample_time);
 	}
 
 	/* Deinit i2c if loop broke */

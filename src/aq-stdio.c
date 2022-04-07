@@ -30,6 +30,7 @@ static esp_at_status *_esp_s = NULL;
 static _aq_iobuf _buffers[AQ_STDIO_BUFFER_NUM];
 static semaphore_t _sem;
 static queue_t _q_tasks;
+static absolute_time_t _wup_time;
 
 static _aq_iobuf *_aq_retrieve_buf();
 static bool _aq_release_buf(_aq_iobuf *buf);
@@ -37,6 +38,7 @@ static void _aq_enqueue_uart(_aq_iobuf *buf);
 static void _aq_enqueue_wifi(_aq_iobuf *buf);
 static void _aq_send_uart(void *buf);
 static void _aq_send_wifi(void *buf);
+static void _aq_sleep_until(void *time);
 static void _aq_stdio_thread_entry();
 static void _aq_process_tasks();
 
@@ -90,6 +92,19 @@ void aq_stdio_deinit()
 void aq_stdio_process()
 {
 	_aq_process_tasks();
+}
+
+void aq_stdio_sleep_until(absolute_time_t time)
+{
+	_wup_time = time;
+	_aq_stdio_task sleep_task = {
+		.priority = 10,
+		.wait = 100,
+		.task = _aq_sleep_until,
+		.data = &_wup_time
+	};
+
+	queue_add_blocking(&_q_tasks, &sleep_task);
 }
 
 _aq_iobuf *_aq_retrieve_buf()
@@ -189,6 +204,13 @@ void _aq_send_wifi(void *buf)
 
 	DEBUGMSG("WIFI send complete, releasing buffer sem");
 	_aq_release_buf(buf);
+}
+
+void _aq_sleep_until(void *time)
+{
+	absolute_time_t *wup = (absolute_time_t*) time;
+
+	sleep_until(*wup);
 }
 
 void _aq_stdio_thread_entry()
