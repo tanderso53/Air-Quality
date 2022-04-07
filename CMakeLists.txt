@@ -20,6 +20,8 @@ option(AIR_QUALITY_WAIT "Wait on connection for application to begin"
 option(AIR_QUALITY_LOG_LEVEL_DEBUG "Enable debug messages to stdout"
   OFF)
 
+set(ESP_AT_MULTICORE ON)
+
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/lib)
 
 ################################

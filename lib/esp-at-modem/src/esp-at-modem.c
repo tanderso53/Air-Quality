@@ -38,8 +38,6 @@
  * library
  */
 
-#define ESP_AT_MULTICORE_ENABLED
-
 #include "esp-at-modem.h"
 #include "at-parse.h"
 #include "debugmsg.h"
