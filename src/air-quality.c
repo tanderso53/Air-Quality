@@ -754,9 +754,6 @@ int main() {
 		aq_nprintf("], \"sentmillis\": %lu}\n",
 			   to_ms_since_boot(get_absolute_time()));
 
-		/* Help second core process any leftover stdio */
-		aq_stdio_process();
-
 		/* Tell stdio core to sleep when done, and sleep this
 		 * core until next sample time */
 		aq_stdio_sleep_until(next_sample_time);
