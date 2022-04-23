@@ -51,12 +51,19 @@
 #include <limits.h>
 
 #include "pico/stdlib.h"
+#ifdef ESP_AT_MULTICORE_ENABLED
+#include "pico/multicore.h"
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 #define _ESP_EN_DELAY_US 500000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+static recursive_mutex_t _esp_mtx;
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 static int _esp_query(const char * cmd, at_rsp_lines *rsp);
 
@@ -77,6 +84,10 @@ int esp_at_init_module()
 	char rxbuf[rxlen];
 
 	DEBUGMSG("Initializing WiFi");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	recursive_mutex_init(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 	/* Initialize gpio pins for enable and reset */
 	_esp_en_gpio_setup();
@@ -182,6 +193,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 {
 	DEBUGDATA("Sending AT command", cmd, "%s");
 
+#ifdef ESP_AT_MULTICORE_ENABLED
+	recursive_mutex_enter_blocking(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+
 	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
 			     cmd);
 
@@ -209,6 +224,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 				DEBUGDATA("Received AT response OK for command",
 					  cmd, "%s");
 
+#ifdef ESP_AT_MULTICORE_ENABLED
+				recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+
 				return 0;
 			}
 
@@ -220,6 +239,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 
 				DEBUGDATA("Received AT response ERROR for command",
 					  cmd, "%s");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+				recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 			
 				return -1;
 			}
@@ -232,6 +255,10 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 
 	DEBUGDATA("Received no AT response before buffer filled command",
 		  cmd, "%s");
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 	return len;
 }
@@ -482,7 +509,13 @@ int _esp_cipsend_data(const char *data, size_t len,
 
 	snprintf(cmd, ARRAY_LEN(cmd) - 1, "AT+CIPSEND=%u,%u",
 		 client_index, strnlen(data, len));
-	
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	/* Make sure cmd and data are given sequentially when
+	 * multithreaded */
+	recursive_mutex_enter_blocking(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+
 	ret = esp_at_send_cmd(cmd, rsp, ARRAY_LEN(rsp));
 
 	DEBUGDATA("AT Send CMD", rsp, "%s");
@@ -491,6 +524,12 @@ int _esp_cipsend_data(const char *data, size_t len,
 		return ret;
 
 	ret = esp_at_send_cmd(data, rsp, sizeof(rsp));
+
+#ifdef ESP_AT_MULTICORE_ENABLED
+	/* Make sure cmd and data are given sequentially when
+	 * multithreaded */
+	recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
 	DEBUGDATA("AT data response", rsp, "%s");
 

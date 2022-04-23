@@ -20,6 +20,8 @@ option(AIR_QUALITY_WAIT "Wait on connection for application to begin"
 option(AIR_QUALITY_LOG_LEVEL_DEBUG "Enable debug messages to stdout"
   OFF)
 
+set(ESP_AT_MULTICORE ON)
+
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/lib)
 
 ################################
@@ -34,6 +36,7 @@ pico_generate_pio_header(air-quality ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio)
 target_sources(air-quality PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/src/air-quality.c
   ${CMAKE_CURRENT_LIST_DIR}/src/aq-error-state.c
+  ${CMAKE_CURRENT_LIST_DIR}/src/aq-stdio.c
   ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
   )
 
@@ -42,7 +45,7 @@ pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
   hardware_uart bme280-interface bme680-interface pm2_5-sensor-interface 
-  hardware_adc esp-at-modem debugmsg)
+  hardware_adc esp-at-modem debugmsg pico_multicore pico_util)
 
 if(AIR_QUALITY_SELF_TEST)
 

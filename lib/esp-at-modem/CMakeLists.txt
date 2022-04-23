@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.22)
 
 project(esp-at-modem)
 
+option(ESP_AT_MULTICORE
+  "Include multi-core capability in interface"
+  OFF)
+
 add_subdirectory(
   ${CMAKE_CURRENT_LIST_DIR}/lib)
 
@@ -27,3 +31,11 @@ target_include_directories(esp-at-modem INTERFACE
 
 target_link_libraries(esp-at-modem INTERFACE
   at-parse pico_stdlib hardware_pio debugmsg)
+
+if(ESP_AT_MULTICORE)
+  target_compile_definitions(esp-at-modem INTERFACE
+    ESP_AT_MULTICORE_ENABLED)
+
+  target_link_libraries(esp-at-modem INTERFACE
+    pico_multicore)
+endif()

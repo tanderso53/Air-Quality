@@ -7,6 +7,8 @@
 #include "ws2812.pio.h"
 #include "debugmsg.h"
 #include "aq-error-state.h"
+#include "aq-stdio.h"
+#include "pico/multicore.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -76,8 +78,6 @@ static void aq_bme280_handle_error(int8_t i_errno, aq_status *s);
 
 static void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s);
 
-static void aq_nprintf(const char * restrict format, ...);
-
 static void aq_wifi_set_flags(aq_status *s);
 
 static uint16_t aq_abrev_netmask(const char *nm);
@@ -87,27 +87,6 @@ static uint16_t aq_abrev_netmask(const char *nm);
 ********************** PROGRAM IMPLEMENTATIONS ***********************
 **********************************************************************
 */
-
-void aq_nprintf(const char * restrict format, ...)
-{
-	char s[512];
-	va_list ap;
-
-	va_start(ap, format);
-
-	vsnprintf(s, sizeof(s) - 1, format, ap);
-	s[ARRAY_LEN(s) - 1] = '\0';
-
-	va_end(ap);
-
-	printf("%s", s);
-
-	if (*op_reg & AQ_STATUS_I_CLIENT_CONNECTED) {
-		DEBUGDATA("Attempting to write WiFi", s, "%s");
-		esp_at_cipsend_string(s, sizeof(s), &aq_wifi_status);
-	}
-	
-}
 
 void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 {
@@ -587,8 +566,9 @@ int main() {
 	op_reg = &status.status;
 
 #ifdef AIR_QUALITY_WAIT_CONNECTION
+	aq_status_set_status(AQ_STATUS_U_REQ_USB, &status);
+
 	for (;;) {
-		aq_status_set_status(AQ_STATUS_U_REQ_USB, &status);
 
 		if (stdio_usb_connected()) {
 			printf("Welcome! You are connected!\n");
@@ -661,19 +641,8 @@ int main() {
 	}
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
-	/* Keep trying to connect to sensor until there is a
-	 * success */
-	for (;;) {
-		ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
-
-		aq_bme680_handle_error(ret, &status);
-
-		if (ret >= 0) {
-			break;
-		}
-
-		sleep_ms(1000);
-	}
+	ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
+	aq_bme680_handle_error(ret, &status);
 
 	aq_hack_bme680(); /* Somehow this fixes bad data on BME680 */
 
@@ -695,15 +664,22 @@ int main() {
 
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
 
+	/* Initialize stdio processing thread */
+	aq_stdio_init(&status, &aq_wifi_status);
+
 	/* Keep polling the sensor for data if initialization was
 	 * successful. This loop will only break on error. */
 	for (;;) {
 		absolute_time_t readtime;
 		uint8_t print_pm = 0;
 
-		if (absolute_time_diff_us(next_sample_time,
-					  get_absolute_time()) < 0) {
-			continue;
+		/* Check USB STDIO */
+		if (stdio_usb_connected()) {
+			aq_status_set_status(AQ_STATUS_I_USBCOMM_CONNECTED,
+					     &status);
+		} else {
+			aq_status_unset_status(AQ_STATUS_I_USBCOMM_CONNECTED,
+					       &status);
 		}
 
 		/* Check wifi */
@@ -716,7 +692,8 @@ int main() {
 		/* Get time before handling error so it's as close as
 		 * possible */
 		readtime = get_absolute_time();
-		next_sample_time = delayed_by_ms(readtime, sample_delay_ms);
+		next_sample_time = delayed_by_ms(next_sample_time,
+						 sample_delay_ms);
 
 		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
 				       &status);
@@ -774,7 +751,13 @@ int main() {
 					    to_ms_since_boot(readtime));
 		}
 
-		aq_nprintf("]}\n");
+		aq_nprintf("], \"sentmillis\": %lu}\n",
+			   to_ms_since_boot(get_absolute_time()));
+
+		/* Tell stdio core to sleep when done, and sleep this
+		 * core until next sample time */
+		aq_stdio_sleep_until(next_sample_time);
+		sleep_until(next_sample_time);
 	}
 
 	/* Deinit i2c if loop broke */
