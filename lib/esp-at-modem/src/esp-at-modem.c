@@ -58,6 +58,7 @@
 #define _ESP_EN_DELAY_US 500000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
+#define _ESP_UART_WAIT_US 1000000
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
@@ -197,8 +198,37 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 	recursive_mutex_enter_blocking(&_esp_mtx);
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
-			     cmd);
+	/* Remove any junk that found its way into the RX buffer
+	 * before we try any commands */
+	uart_rx_program_flush(AIR_QUALITY_WIFI_PIO,
+			      AIR_QUALITY_WIFI_RX_SM);
+
+	for (unsigned int i = 0; cmd[i] != '\0'; ++i) {
+		absolute_time_t to = make_timeout_time_us(_ESP_UART_WAIT_US);
+		bool writable;
+
+		do {
+			writable = uart_tx_program_is_writable(AIR_QUALITY_WIFI_PIO,
+							       AIR_QUALITY_WIFI_TX_SM);
+		} while (!writable && absolute_time_diff_us(to, get_absolute_time()));
+
+		/* Semi-blocking with hard-coded timeout */
+		if (writable) {
+			uart_tx_program_putc(AIR_QUALITY_WIFI_PIO,
+					     AIR_QUALITY_WIFI_TX_SM,
+					     cmd[i]);
+		} else {
+			DEBUGDATA("ESP send cmd timeout", cmd, "%s");
+
+			/* Flush TX on failure */
+			uart_tx_program_flush(AIR_QUALITY_WIFI_PIO,
+					      AIR_QUALITY_WIFI_TX_SM);
+#ifdef ESP_AT_MULTICORE_ENABLED
+			recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+			return -1;
+		}
+	}
 
 	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
 			     "\r\n");
@@ -206,11 +236,25 @@ int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
 	DEBUGMSG("Checking AT response");
 
 	for (unsigned int i = 0; i < len - 1; i++) {
-
+		absolute_time_t to = make_timeout_time_us(_ESP_UART_WAIT_US);
 		char c;
+		bool readable;
 
-		c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
-					 AIR_QUALITY_WIFI_RX_SM);
+		do {
+			readable = uart_rx_program_is_readable(AIR_QUALITY_WIFI_PIO,
+							       AIR_QUALITY_WIFI_RX_SM);
+		} while (!readable && absolute_time_diff_us(to, get_absolute_time()));
+
+		if (readable) {
+			c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
+						 AIR_QUALITY_WIFI_RX_SM);
+		} else {
+			DEBUGDATA("ESP response timeout", cmd, "%s");
+#ifdef ESP_AT_MULTICORE_ENABLED
+			recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+			return -1;
+		}
 
 		rsp[i] = c;
 

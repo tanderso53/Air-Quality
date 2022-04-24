@@ -197,9 +197,17 @@ void _aq_send_wifi(void *buf)
 	_aq_iobuf *s = (_aq_iobuf*) buf;
 
 	if (_aq_s->status & AQ_STATUS_I_CLIENT_CONNECTED) {
+		int rslt = 0;
+
 		DEBUGDATA("Attempting to write WiFi", s->buf, "%s");
-		esp_at_cipsend_string(s->buf, sizeof(s->buf),
+		rslt = esp_at_cipsend_string(s->buf, sizeof(s->buf),
 				      _esp_s);
+
+		if (rslt < 0) {
+			_aq_s->status |= AQ_STATUS_E_WIFI_FAIL;
+		} else {
+			_aq_s->status &= ~AQ_STATUS_E_WIFI_FAIL;
+		}
 	}
 
 	DEBUGMSG("WIFI send complete, releasing buffer sem");
