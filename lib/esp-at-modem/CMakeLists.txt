@@ -16,21 +16,13 @@ builddoxygendocs(ESP_AT)
 add_library(esp-at-modem INTERFACE)
 
 target_sources(esp-at-modem INTERFACE
-  ${CMAKE_CURRENT_LIST_DIR}/src/esp-at-modem.c
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_tx.pio
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_rx.pio)
-
-pico_generate_pio_header(esp-at-modem
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_tx.pio)
-
-pico_generate_pio_header(esp-at-modem
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_rx.pio)
+  ${CMAKE_CURRENT_LIST_DIR}/src/esp-at-modem.c)
 
 target_include_directories(esp-at-modem INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/include)
 
 target_link_libraries(esp-at-modem INTERFACE
-  at-parse pico_stdlib hardware_pio debugmsg)
+  at-parse uart-pio pico_stdlib hardware_pio debugmsg)
 
 if(ESP_AT_MULTICORE)
   target_compile_definitions(esp-at-modem INTERFACE

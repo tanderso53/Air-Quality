@@ -46,6 +46,38 @@
 #define AIR_QUALITY_BATT_LOW_V ((double) 3.60)
 #endif
 
+#ifndef AIR_QUALITY_WIFI_TX_PIN
+#define AIR_QUALITY_WIFI_TX_PIN 10
+#endif
+
+#ifndef AIR_QUALITY_WIFI_RX_PIN
+#define AIR_QUALITY_WIFI_RX_PIN 11
+#endif
+
+#ifndef AIR_QUALITY_WIFI_GPIO_EN_PIN
+#define AIR_QUALITY_WIFI_GPIO_EN_PIN 12
+#endif
+
+#ifndef AIR_QUALITY_WIFI_GPIO_RESET_PIN
+#define AIR_QUALITY_WIFI_GPIO_RESET_PIN 13
+#endif
+
+#ifndef AIR_QUALITY_WIFI_PIO
+#define AIR_QUALITY_WIFI_PIO pio1
+#endif
+
+#ifndef AIR_QUALITY_WIFI_BAUD
+#define AIR_QUALITY_WIFI_BAUD 115200
+#endif
+
+#ifndef AIR_QUALITY_WIFI_TX_SM
+#define AIR_QUALITY_WIFI_TX_SM 0
+#endif
+
+#ifndef AIR_QUALITY_WIFI_RX_SM
+#define AIR_QUALITY_WIFI_RX_SM 1
+#endif
+
 #ifndef PICO_BOARD
 #define PICO_BOARD "unknown"
 #endif
@@ -64,6 +96,8 @@
 */
 
 static uint32_t *op_reg = NULL; /**< @brief Operational Register */
+
+static esp_at_cfg aq_wifi_cfg;
 
 static esp_at_status aq_wifi_status;
 
@@ -463,7 +497,7 @@ void aq_wifi_set_flags(aq_status *s)
 {
 	int rslt;
 
-	rslt = esp_at_cipstatus(&aq_wifi_status);
+	rslt = esp_at_cipstatus(&aq_wifi_cfg, &aq_wifi_status);
 
 	if (rslt) {
 		aq_status_set_status(AQ_STATUS_E_WIFI_FAIL |
@@ -609,7 +643,14 @@ int main() {
 	aq_adc_init();
 
 	/* Initialize WiFi Module */
-	if (esp_at_init_module() == 0) {
+	if (esp_at_init_module(&aq_wifi_cfg, AIR_QUALITY_WIFI_PIO,
+			       AIR_QUALITY_WIFI_TX_SM,
+			       AIR_QUALITY_WIFI_RX_SM,
+			       AIR_QUALITY_WIFI_TX_PIN,
+			       AIR_QUALITY_WIFI_RX_PIN,
+			       AIR_QUALITY_WIFI_BAUD,
+			       AIR_QUALITY_WIFI_GPIO_EN_PIN,
+			       AIR_QUALITY_WIFI_GPIO_RESET_PIN)) {
 		aq_status_unset_status(AQ_STATUS_W_WIFI_DISCONNECTED,
 				       &status);
 	} else {
@@ -619,7 +660,7 @@ int main() {
 	}
 
 	if (!(status.status & AQ_STATUS_W_WIFI_DISCONNECTED)) {
-		ret = esp_at_cipserver_init();
+		ret = esp_at_cipserver_init(&aq_wifi_cfg);
 
 		if (ret < 0) {
 			printf("Error: Could not initialize WiFi server\n");
@@ -635,7 +676,7 @@ int main() {
 	if (!(status.status & AQ_STATUS_W_WIFI_DISCONNECTED)) {
 		aq_status_set_status(AQ_STATUS_U_REQ_USER_INPUT,
 				     &status);
-		esp_at_passthrough();
+		esp_at_passthrough(&aq_wifi_cfg);
 		aq_status_unset_status(AQ_STATUS_U_REQ_USER_INPUT,
 				       &status);
 	}
