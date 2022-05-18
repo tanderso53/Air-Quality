@@ -52,7 +52,7 @@
 #include "pico/multicore.h"
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-#define _ESP_EN_DELAY_US 500000
+#define _ESP_EN_DELAY_US 5000000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
 #define _ESP_UART_WAIT_US 1000000
@@ -96,7 +96,7 @@ int esp_at_init_module(esp_at_cfg *cfg, PIO pio, uint sm_tx,
 		       uint baud, uint en_pin, uint reset_pin)
 {
 	int rslt;
-	const unsigned int rxlen = 64;
+	const unsigned int rxlen = 128;
 	char rxbuf[rxlen];
 
 	DEBUGMSG("Initializing WiFi");
@@ -129,6 +129,7 @@ int esp_at_init_module(esp_at_cfg *cfg, PIO pio, uint sm_tx,
 	_esp_reset(cfg);
 	sleep_us(_ESP_EN_DELAY_US); /* Module may need time to boot */
 
+	/* esp_at_passthrough(cfg); */
 	/* Check connection */
 	rslt = esp_at_send_cmd(cfg, "AT", rxbuf, rxlen);
 
@@ -695,14 +696,17 @@ int _esp_check_cipmux(esp_at_cfg *cfg, esp_at_status *clientlist)
 
 int _esp_transmit_cmd(esp_at_cfg *cfg, const char *cmd)
 {
+	const char *eot = "\r\n";
 	char outstr[256];
 
 	/* Add CR and LF to string */
-	strncpy(outstr, cmd, sizeof(outstr));
-	strlcat(outstr, "\r\n", sizeof(outstr));
+	strlcpy(outstr, cmd, ARRAY_LEN(outstr) - strlen(eot) - 1);
+	strlcat(outstr, eot, ARRAY_LEN(outstr) - 1);
+
+	DEBUGDATA("ESP RX is", outstr, "%s");
 
 	/* Semi-blocking with hard-coded timeout */
-	if (uart_pio_puts_timeout(&cfg->uart_cfg, cmd,
+	if (uart_pio_puts_timeout(&cfg->uart_cfg, outstr,
 				  _ESP_UART_WAIT_US)) {
 		return 0;
 	}
@@ -718,22 +722,25 @@ int _esp_transmit_cmd(esp_at_cfg *cfg, const char *cmd)
 int _esp_receive_response(esp_at_cfg *cfg, char *rsp, size_t len)
 {
 	int rslt = 0;
+	memset(rsp, '\0', sizeof(char) * len);
 
 	for (unsigned int i = 0; i < len - 1; i++) {
-		char c = '\0';
+		char *c = &rsp[i];
 
-		if (!uart_pio_getc_timeout(&cfg->uart_cfg, &c,
+		if (!uart_pio_getc_timeout(&cfg->uart_cfg, c,
 					   _ESP_UART_WAIT_US)) {
 			DEBUGMSG("ESP response timeout");
 			break;
 		}
+		/* *c = uart_pio_getc_blocking(&cfg->uart_cfg); */
+		/* DEBUGDATA("Received Char", *c, "%u"); */
 
-		if (c) {
-			rsp[i] = c;
-			rsp[i + 1] = '\0'; /* Make sure this is a valid string */
-		} else {
-			--i;
-		}
+		/* if (c) { */
+		/* 	rsp[i] = c; */
+		/* 	rsp[i + 1] = '\0'; /\* Make sure this is a valid string *\/ */
+		/* } else { */
+		/* 	--i; */
+		/* } */
 
 		if (!_esp_check_at_end_sequence(rsp))
 			continue;
@@ -767,11 +774,14 @@ int _esp_receive_response(esp_at_cfg *cfg, char *rsp, size_t len)
 
 bool _esp_check_at_end_sequence(const char *rsp)
 {
+	const char *endseq = "\r\n";
 	unsigned int len = strlen(rsp);
 
 	if (len < 2)
 		return false;
-	return !strcmp(&rsp[len - 2], "\r\n");
+
+	return !strncmp(&rsp[len - 2], endseq,
+			strlen(endseq) * sizeof(char));
 }
 
 int _esp_check_rsp_success(const char *rsp)

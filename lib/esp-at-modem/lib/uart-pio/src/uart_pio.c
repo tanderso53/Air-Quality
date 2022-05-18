@@ -5,7 +5,9 @@
  */
 
 #include "uart_pio.h"
-#include "uart_pio_program.pio.h"
+/* #include "uart_pio_program.pio.h" */
+#include "uart_tx.pio.h"
+#include "uart_rx.pio.h"
 #include "debugmsg.h"
 
 #include <string.h>
