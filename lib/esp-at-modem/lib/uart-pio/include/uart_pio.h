@@ -19,8 +19,6 @@
 #define UART_PIO_OK			0
 #define UART_PIO_E_HARDWARE_FAIL	-1
 #define UART_PIO_E_NULL_PTR		-2
-#define UART_PIO_INT_E_FRAMING		4
-#define UART_PIO_FLAG_E_FRAMING		0x0001
 
 /** @brief Config for the PIO uart
  *
@@ -103,21 +101,6 @@ void uart_pio_flush_tx(uart_pio_cfg *cfg);
 
 /** @brief Flush RX FIFO */
 void uart_pio_flush_rx(uart_pio_cfg *cfg);
-
-/** @brief Check for error flags on the PIO
- *
- * @return bitmask of the current flags
- */
-uint uart_pio_check_flags(uart_pio_cfg *cfg);
-
-/** @brief Clear flags in the PIO */
-void uart_pio_clear_flags(uart_pio_cfg *cfg);
-
-/** @brief Check for error flags, then clear all flags on PIO
- *
- * @return Bitmask of the current flags
- */
-uint uart_pio_check_flags_and_clear(uart_pio_cfg *cfg);
 
 /**
  * @}

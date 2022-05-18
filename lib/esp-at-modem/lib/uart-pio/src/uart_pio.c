@@ -119,35 +119,5 @@ void uart_pio_flush_tx(uart_pio_cfg *cfg)
 
 void uart_pio_flush_rx(uart_pio_cfg *cfg)
 {
-	char c = '\0';
-
-	while (uart_pio_getc_timeout(cfg, &c, 100000)) {
-		tight_loop_contents();
-	}
-	/* pio_sm_clear_fifos(cfg->pio, cfg->sm_rx); */
-}
-
-uint uart_pio_check_flags(uart_pio_cfg *cfg)
-{
-	uint ret = 0;
-
-	if (pio_interrupt_get(cfg->pio, UART_PIO_INT_E_FRAMING)) {
-		ret |= UART_PIO_FLAG_E_FRAMING;
-	}
-
-	return ret;
-}
-
-void uart_pio_clear_flags(uart_pio_cfg *cfg)
-{
-	pio_interrupt_clear(cfg->pio, UART_PIO_INT_E_FRAMING);
-}
-
-uint uart_pio_check_flags_and_clear(uart_pio_cfg *cfg)
-{
-	uint ret = uart_pio_check_flags(cfg);
-
-	uart_pio_clear_flags(cfg);
-
-	return ret;
+	pio_sm_clear_fifos(cfg->pio, cfg->sm_rx);
 }
