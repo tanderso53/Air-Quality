@@ -55,7 +55,7 @@
 #endif
 
 #ifndef AIR_QUALITY_WIFI_GPIO_EN_PIN
-#define AIR_QUALITY_WIFI_GPIO_EN_PIN 12
+#define AIR_QUALITY_WIFI_GPIO_EN_PIN 7
 #endif
 
 #ifndef AIR_QUALITY_WIFI_GPIO_RESET_PIN
@@ -650,7 +650,7 @@ int main() {
 			       AIR_QUALITY_WIFI_RX_PIN,
 			       AIR_QUALITY_WIFI_BAUD,
 			       AIR_QUALITY_WIFI_GPIO_EN_PIN,
-			       AIR_QUALITY_WIFI_GPIO_RESET_PIN)) {
+			       AIR_QUALITY_WIFI_GPIO_RESET_PIN) > 0) {
 		aq_status_unset_status(AQ_STATUS_W_WIFI_DISCONNECTED,
 				       &status);
 	} else {

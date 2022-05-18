@@ -52,10 +52,10 @@
 #include "pico/multicore.h"
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-#define _ESP_EN_DELAY_US 500000
+#define _ESP_EN_DELAY_US 2000000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
-#define _ESP_UART_WAIT_US 1000000
+#define _ESP_UART_WAIT_US 10000000
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
@@ -128,9 +128,24 @@ int esp_at_init_module(esp_at_cfg *cfg, PIO pio, uint sm_tx,
 	_esp_set_enabled(cfg, true);
 	_esp_reset(cfg);
 	sleep_us(_ESP_EN_DELAY_US); /* Module may need time to boot */
+	esp_at_passthrough(cfg);
 
 	/* Check connection */
-	rslt = esp_at_send_cmd(cfg, "AT", rxbuf, rxlen);
+	for (int tries = 5; tries > 0; --tries)
+	{
+		rslt = esp_at_send_cmd(cfg, "AT", rxbuf, rxlen);
+
+		if (rslt > 0)
+			break;
+
+		/* Turn off and on again if there was a UART timing
+		 * error */
+		if (uart_pio_check_flags_and_clear(&cfg->uart_cfg)) {
+			DEBUGDATA("UART PIO Framing Error, retry no",
+				  tries, "%u");
+			_esp_reset(cfg);
+		}
+	}
 
 	if (rslt > 0) {
 		cfg->ptr = cfg;
@@ -228,7 +243,7 @@ int esp_at_send_cmd(esp_at_cfg *cfg, const char *cmd, char *rsp,
 
 	/* Remove any junk that found its way into the RX buffer
 	 * before we try any commands */
-	/* uart_pio_flush_rx(&cfg->uart_cfg); */
+	uart_pio_flush_rx(&cfg->uart_cfg);
 
 	/* Returns 0 if successful */
 	rslt = _esp_transmit_cmd(cfg, cmd);
