@@ -10,10 +10,14 @@ add_library(${PROJECT_NAME} INTERFACE)
 
 target_sources(${PROJECT_NAME} INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/src/uart_pio.c
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_pio_program.pio)
+  ${CMAKE_CURRENT_LIST_DIR}/src/uart_tx.pio
+  ${CMAKE_CURRENT_LIST_DIR}/src/uart_rx.pio)
 
 pico_generate_pio_header(${PROJECT_NAME}
-  ${CMAKE_CURRENT_LIST_DIR}/src/uart_pio_program.pio)
+  ${CMAKE_CURRENT_LIST_DIR}/src/uart_tx.pio)
+
+pico_generate_pio_header(${PROJECT_NAME}
+  ${CMAKE_CURRENT_LIST_DIR}/src/uart_rx.pio)
 
 target_include_directories(${PROJECT_NAME} INTERFACE
   ${CMAKE_CURRENT_LIST_DIR}/include)
