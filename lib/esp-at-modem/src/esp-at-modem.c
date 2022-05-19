@@ -42,9 +42,6 @@
 #include "at-parse.h"
 #include "debugmsg.h"
 
-#include "uart_tx.pio.h"
-#include "uart_rx.pio.h"
-
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,9 +52,10 @@
 #include "pico/multicore.h"
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-#define _ESP_EN_DELAY_US 500000
+#define _ESP_EN_DELAY_US 5000000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
+#define _ESP_UART_WAIT_US 500000
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
@@ -65,22 +63,40 @@
 static recursive_mutex_t _esp_mtx;
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-static int _esp_query(const char * cmd, at_rsp_lines *rsp);
+static int _esp_query(esp_at_cfg * cfg, const char * cmd,
+		      at_rsp_lines *rsp);
 
-static void _esp_en_gpio_setup();
-static void _esp_reset_gpio_setup();
-static void _esp_set_enabled(bool en); /* True to enable, false to disable */
-static void _esp_reset();
-static int _esp_cipsend_data(const char *data, size_t len,
+static void _esp_en_gpio_setup(esp_at_cfg * cfg);
+static void _esp_reset_gpio_setup(esp_at_cfg * cfg);
+static void _esp_set_enabled(esp_at_cfg * cfg, bool en); /* True to enable, false to disable */
+static void _esp_reset(esp_at_cfg * cfg);
+static int _esp_cipsend_data(esp_at_cfg * cfg, const char *data,
+			     size_t len,
 			     unsigned int client_index);
-static int _esp_check_cipsta(esp_at_status *clientlist);
-static int _esp_check_cipstatus(esp_at_status *clientlist);
-static int _esp_check_cipmux(esp_at_status *clientlist);
+static int _esp_check_cipsta(esp_at_cfg * cfg,
+			     esp_at_status *clientlist);
+static int _esp_check_cipstatus(esp_at_cfg * cfg,
+				esp_at_status *clientlist);
+static int _esp_check_cipmux(esp_at_cfg * cfg,
+			     esp_at_status *clientlist);
+static int _esp_transmit_cmd(esp_at_cfg *cfg, const char *cmd);
+static int _esp_receive_response(esp_at_cfg *cfg, char *rsp,
+				 size_t len);
+static bool _esp_check_at_end_sequence(const char *rsp);
+static int _esp_check_rsp_success(const char *rsp);
 
-int esp_at_init_module()
+/*
+**********************************************************************
+******************* API FUNCTION IMPLEMENTATION **********************
+**********************************************************************
+*/
+
+int esp_at_init_module(esp_at_cfg *cfg, PIO pio, uint sm_tx,
+		       uint sm_rx, uint pin_tx, uint pin_rx,
+		       uint baud, uint en_pin, uint reset_pin)
 {
-	uint offset;
-	const unsigned int rxlen = 64;
+	int rslt;
+	const unsigned int rxlen = 128;
 	char rxbuf[rxlen];
 
 	DEBUGMSG("Initializing WiFi");
@@ -89,47 +105,56 @@ int esp_at_init_module()
 	recursive_mutex_init(&_esp_mtx);
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
+	cfg->ptr = NULL;
+	cfg->en_pin = en_pin;
+	cfg->reset_pin = reset_pin;
+
 	/* Initialize gpio pins for enable and reset */
-	_esp_en_gpio_setup();
-	_esp_reset_gpio_setup();
+	_esp_en_gpio_setup(cfg);
+	_esp_reset_gpio_setup(cfg);
 
-	/* Set up TX */
-	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_tx_program);
+	/* Set up UART */
+	cfg->uart_cfg.pio = pio;
+	cfg->uart_cfg.sm_tx = sm_tx;
+	cfg->uart_cfg.sm_rx = sm_rx;
+	cfg->uart_cfg.pin_tx = pin_tx;
+	cfg->uart_cfg.pin_rx = pin_rx;
+	cfg->uart_cfg.baud = baud;
 
-	uart_tx_program_init(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
-			     offset, AIR_QUALITY_WIFI_TX_PIN,
-			     AIR_QUALITY_WIFI_BAUD);
-
-	/* Set up RX */
-	offset = pio_add_program(AIR_QUALITY_WIFI_PIO, &uart_rx_program);
-
-	uart_rx_program_init(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_RX_SM,
-			     offset, AIR_QUALITY_WIFI_RX_PIN,
-			     AIR_QUALITY_WIFI_BAUD);
+	if (uart_pio_init(&cfg->uart_cfg) != UART_PIO_OK)
+		return -1;
 
 	/* Reset and enable ESP8266 */
-	_esp_set_enabled(true);
-	_esp_reset();
+	_esp_set_enabled(cfg, true);
+	_esp_reset(cfg);
 	sleep_us(_ESP_EN_DELAY_US); /* Module may need time to boot */
 
+	/* esp_at_passthrough(cfg); */
 	/* Check connection */
-	return esp_at_send_cmd("AT", rxbuf, rxlen);
+	rslt = esp_at_send_cmd(cfg, "AT", rxbuf, rxlen);
+
+	if (rslt > 0) {
+		cfg->ptr = cfg;
+	}
+
+	return rslt;
 }
 
-int esp_at_cipserver_init()
+int esp_at_cipserver_init(esp_at_cfg *cfg)
 {
 	int ret;
 	char rsp[_ESP_RESPONSE_BUFFER_LEN];
 
 	/* Set up server */
-	ret = esp_at_send_cmd("AT+CIPMUX=1", rsp, ARRAY_LEN(rsp));
+	ret = esp_at_send_cmd(cfg, "AT+CIPMUX=1", rsp, ARRAY_LEN(rsp));
 	DEBUGDATA("When muxing ESP", rsp, "%s");
 
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = esp_at_send_cmd("AT+CIPSERVER=1", rsp, ARRAY_LEN(rsp));
+	ret = esp_at_send_cmd(cfg, "AT+CIPSERVER=1", rsp,
+			      ARRAY_LEN(rsp));
 
 	if (ret < 0) {
 		return ret;
@@ -138,7 +163,7 @@ int esp_at_cipserver_init()
 	return 0;
 }
 
-int esp_at_cipsend_string(const char *s, size_t len,
+int esp_at_cipsend_string(esp_at_cfg *cfg, const char *s, size_t len,
 			  esp_at_status *clientlist)
 {
 	int ret;
@@ -147,14 +172,14 @@ int esp_at_cipsend_string(const char *s, size_t len,
 		return 0;
 
 	if (!clientlist) {
-		ret = _esp_cipsend_data(s, len, 0);
+		ret = _esp_cipsend_data(cfg, s, len, 0);
 		return ret;
 	}
 
 	for (unsigned int i = 0; i < clientlist->ncli; ++i) {
 		unsigned int ci = clientlist->cli[i].index;
 
-		ret = _esp_cipsend_data(s, len, ci);
+		ret = _esp_cipsend_data(cfg, s, len, ci);
 
 		if (ret < 0) {
 			return ret;
@@ -164,23 +189,25 @@ int esp_at_cipsend_string(const char *s, size_t len,
 	return 0;
 }
 
-int esp_at_cipstatus(esp_at_status *clientlist)
+int esp_at_cipstatus(esp_at_cfg *cfg, esp_at_status *clientlist)
 {
 	int ret;
 
-	ret = _esp_check_cipsta(clientlist);
+	clientlist->cfg = cfg;
+
+	ret = _esp_check_cipsta(cfg, clientlist);
 
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = _esp_check_cipstatus(clientlist);
+	ret = _esp_check_cipstatus(cfg, clientlist);
 
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = _esp_check_cipmux(clientlist);
+	ret = _esp_check_cipmux(cfg, clientlist);
 
 	if (ret < 0) {
 		return ret;
@@ -189,81 +216,44 @@ int esp_at_cipstatus(esp_at_status *clientlist)
 	return 0;
 }
 
-int esp_at_send_cmd(const char *cmd, char *rsp, unsigned int len)
+int esp_at_send_cmd(esp_at_cfg *cfg, const char *cmd, char *rsp,
+		    unsigned int len)
 {
+	int rslt;
+
 	DEBUGDATA("Sending AT command", cmd, "%s");
 
 #ifdef ESP_AT_MULTICORE_ENABLED
 	recursive_mutex_enter_blocking(&_esp_mtx);
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
-			     cmd);
+	/* Remove any junk that found its way into the RX buffer
+	 * before we try any commands */
+	uart_pio_flush_rx(&cfg->uart_cfg);
 
-	uart_tx_program_puts(AIR_QUALITY_WIFI_PIO, AIR_QUALITY_WIFI_TX_SM,
-			     "\r\n");
+	/* Returns 0 if successful */
+	rslt = _esp_transmit_cmd(cfg, cmd);
+
+	if (rslt != 0) {
+		DEBUGDATA("ESP response timeout", cmd, "%s");
+#ifdef ESP_AT_MULTICORE_ENABLED
+		recursive_mutex_exit(&_esp_mtx);
+#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
+		return -1;
+	}
 
 	DEBUGMSG("Checking AT response");
 
-	for (unsigned int i = 0; i < len - 1; i++) {
-
-		char c;
-
-		c = uart_rx_program_getc(AIR_QUALITY_WIFI_PIO,
-					 AIR_QUALITY_WIFI_RX_SM);
-
-		rsp[i] = c;
-
-		if (i > 0 && rsp[i - 1] == '\r' && rsp[i] == '\n') {
-			DEBUGMSG("Found AT end sequence");
-			if (memcmp(&rsp[i - 3], "OK", sizeof(char) * 2) == 0) {
-				if (i + 1 < len) {
-					rsp[i + 1] = '\0';
-				}
-
-				DEBUGDATA("Received AT response OK for command",
-					  cmd, "%s");
-
-#ifdef ESP_AT_MULTICORE_ENABLED
-				recursive_mutex_exit(&_esp_mtx);
-#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
-
-				return 0;
-			}
-
-			if (memcmp(&rsp[i - 6], "ERROR", sizeof(char) * 5) == 0) {
-
-				if (i + 1 < len) {
-					rsp[i + 1] = '\0';
-				}
-
-				DEBUGDATA("Received AT response ERROR for command",
-					  cmd, "%s");
-
-#ifdef ESP_AT_MULTICORE_ENABLED
-				recursive_mutex_exit(&_esp_mtx);
-#endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
-			
-				return -1;
-			}
-
-			rsp[i+1] = '\0';
-
-			DEBUGDATA("AT Response so far", rsp, "%s");
-		}
-	}
-
-	DEBUGDATA("Received no AT response before buffer filled command",
-		  cmd, "%s");
+	rslt = _esp_receive_response(cfg, rsp, len);
 
 #ifdef ESP_AT_MULTICORE_ENABLED
 	recursive_mutex_exit(&_esp_mtx);
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-	return len;
+	return rslt;
 }
 
-void esp_at_passthrough()
+void esp_at_passthrough(esp_at_cfg *cfg)
 {
 	char cmd[128];
 	size_t i = 0;
@@ -317,7 +307,8 @@ void esp_at_passthrough()
 				char rsp[258];
 
 				/* Send command to ESP module */
-				esp_at_send_cmd(cmd, rsp, ARRAY_LEN(rsp));
+				esp_at_send_cmd(cfg, cmd, rsp,
+						ARRAY_LEN(rsp));
 				printf("%s", rsp);
 			}
 
@@ -348,7 +339,7 @@ void esp_at_passthrough()
 	}
 }
 
-int esp_at_deep_sleep(unsigned long time_ms)
+int esp_at_deep_sleep(esp_at_cfg *cfg, unsigned long time_ms)
 {
 	char buf[512] = {'\0'};
 	char cmd[36] = {'\0'};
@@ -356,21 +347,21 @@ int esp_at_deep_sleep(unsigned long time_ms)
 	snprintf(cmd, sizeof(cmd) - 1, "AT+GSLP=%lu",
 		time_ms);
 
-	return esp_at_send_cmd(cmd, buf, sizeof(buf));
+	return esp_at_send_cmd(cfg, cmd, buf, sizeof(buf));
 }
 
-int esp_at_sleep()
+int esp_at_sleep(esp_at_cfg *cfg)
 {
 	char buf[512] = {'\0'};
 
-	return esp_at_send_cmd("AT+SLEEP=1", buf, sizeof(buf));
+	return esp_at_send_cmd(cfg, "AT+SLEEP=1", buf, sizeof(buf));
 }
 
-int esp_at_wake_up()
+int esp_at_wake_up(esp_at_cfg *cfg)
 {
 	char buf[512] = {'\0'};
 
-	return esp_at_send_cmd("AT+SLEEP=0", buf, sizeof(buf));
+	return esp_at_send_cmd(cfg, "AT+SLEEP=0", buf, sizeof(buf));
 }
 
 /*
@@ -379,9 +370,9 @@ int esp_at_wake_up()
 **********************************************************************
 */
 
-void _esp_en_gpio_setup()
+void _esp_en_gpio_setup(esp_at_cfg *cfg)
 {
-	const uint gpin = AIR_QUALITY_WIFI_GPIO_EN_PIN;
+	const uint gpin = cfg->en_pin;
 
 	gpio_init(gpin);
 
@@ -393,9 +384,9 @@ void _esp_en_gpio_setup()
 	gpio_put(gpin, false);
 }
 
-void _esp_reset_gpio_setup()
+void _esp_reset_gpio_setup(esp_at_cfg *cfg)
 {
-	const uint gpin = AIR_QUALITY_WIFI_GPIO_RESET_PIN;
+	const uint gpin = cfg->reset_pin;
 
 	gpio_init(gpin);
 
@@ -407,17 +398,17 @@ void _esp_reset_gpio_setup()
 	gpio_put(gpin, true);
 }
 
-void _esp_set_enabled(bool en)
+void _esp_set_enabled(esp_at_cfg *cfg, bool en)
 {
-	const uint gpin = AIR_QUALITY_WIFI_GPIO_EN_PIN;
+	const uint gpin = cfg->en_pin;
 
 	/* High enabled, low disabled */
 	gpio_put(gpin, en);
 }
 
-void _esp_reset()
+void _esp_reset(esp_at_cfg *cfg)
 {
-	const uint gpin = AIR_QUALITY_WIFI_GPIO_RESET_PIN;
+	const uint gpin = cfg->reset_pin;
 
 	gpio_put(gpin, false); /* Drive low to reset module */
 
@@ -426,7 +417,8 @@ void _esp_reset()
 	gpio_put(gpin, true); /* Return reset pin to normal */
 }
 
-int _esp_parse_cw_wifi_state(esp_at_status *clientlist)
+int _esp_parse_cw_wifi_state(esp_at_cfg *cfg,
+			     esp_at_status *clientlist)
 {
 	int ret;
 	char rsp[_ESP_RESPONSE_BUFFER_LEN];
@@ -435,7 +427,7 @@ int _esp_parse_cw_wifi_state(esp_at_status *clientlist)
 	int n = 0;
 
 	/* Get WiFi connection state */
-	ret = esp_at_send_cmd("AT+CWSTATE?", rsp, ARRAY_LEN(rsp));
+	ret = esp_at_send_cmd(cfg, "AT+CWSTATE?", rsp, ARRAY_LEN(rsp));
 
 	if (ret < 0) {
 		return ret;
@@ -484,12 +476,12 @@ int _esp_parse_cw_wifi_state(esp_at_status *clientlist)
 	return 0;
 }
 
-int _esp_query(const char * cmd, at_rsp_lines *rsp)
+int _esp_query(esp_at_cfg *cfg, const char * cmd, at_rsp_lines *rsp)
 {
 	int ret;
 	char buf[4096];
 
-	ret = esp_at_send_cmd(cmd, buf, ARRAY_LEN(buf));
+	ret = esp_at_send_cmd(cfg, cmd, buf, ARRAY_LEN(buf));
 
 	if (ret < 0) {
 		return -1;
@@ -500,7 +492,7 @@ int _esp_query(const char * cmd, at_rsp_lines *rsp)
 	return ret;
 }
 
-int _esp_cipsend_data(const char *data, size_t len,
+int _esp_cipsend_data(esp_at_cfg *cfg, const char *data, size_t len,
 		      unsigned int client_index)
 {
 	int ret;
@@ -516,14 +508,14 @@ int _esp_cipsend_data(const char *data, size_t len,
 	recursive_mutex_enter_blocking(&_esp_mtx);
 #endif /* #ifdef ESP_AT_MULTICORE_ENABLED */
 
-	ret = esp_at_send_cmd(cmd, rsp, ARRAY_LEN(rsp));
+	ret = esp_at_send_cmd(cfg, cmd, rsp, ARRAY_LEN(rsp));
 
 	DEBUGDATA("AT Send CMD", rsp, "%s");
 
 	if (ret < 0)
 		return ret;
 
-	ret = esp_at_send_cmd(data, rsp, sizeof(rsp));
+	ret = esp_at_send_cmd(cfg, data, rsp, sizeof(rsp));
 
 #ifdef ESP_AT_MULTICORE_ENABLED
 	/* Make sure cmd and data are given sequentially when
@@ -536,7 +528,7 @@ int _esp_cipsend_data(const char *data, size_t len,
 	return ret;
 }
 
-int _esp_check_cipsta(esp_at_status *clientlist)
+int _esp_check_cipsta(esp_at_cfg *cfg, esp_at_status *clientlist)
 {
 	int ret;
 	at_rsp_lines rsp;
@@ -546,7 +538,7 @@ int _esp_check_cipsta(esp_at_status *clientlist)
 	at_rsp_tk *netmask;
 
 	/* Get WiFi IP address */
-	ret = _esp_query("AT+CIPSTA?", &rsp);
+	ret = _esp_query(cfg, "AT+CIPSTA?", &rsp);
 
 	if (ret < 0) {
 		return ret;
@@ -582,7 +574,7 @@ int _esp_check_cipsta(esp_at_status *clientlist)
 }
 
 
-int _esp_check_cipstatus(esp_at_status *clientlist)
+int _esp_check_cipstatus(esp_at_cfg *cfg, esp_at_status *clientlist)
 {
 	int ret;
 	at_rsp_lines rsp;
@@ -590,7 +582,7 @@ int _esp_check_cipstatus(esp_at_status *clientlist)
 
 	/* Some ESP8266 modules don't support AT+CIPSTATE, so use
 	 * AT+CIPSTATUS to get most of the networking info */
-	ret = _esp_query("AT+CIPSTATUS", &rsp);
+	ret = _esp_query(cfg, "AT+CIPSTATUS", &rsp);
 
 	if (ret < 0) {
 		return ret;
@@ -677,7 +669,7 @@ int _esp_check_cipstatus(esp_at_status *clientlist)
 	return 0;
 }
 
-int _esp_check_cipmux(esp_at_status *clientlist)
+int _esp_check_cipmux(esp_at_cfg *cfg, esp_at_status *clientlist)
 {
 	int ret;
 	at_rsp_lines rsp;
@@ -685,7 +677,7 @@ int _esp_check_cipmux(esp_at_status *clientlist)
 	esp_at_status_byte *status = &clientlist->status;
 
 	/* Query specific server parameters */
-	ret = _esp_query("AT+CIPMUX?", &rsp);
+	ret = _esp_query(cfg, "AT+CIPMUX?", &rsp);
 
 	if (ret < 0) {
 		return ret;
@@ -702,3 +694,107 @@ int _esp_check_cipmux(esp_at_status *clientlist)
 	return 0;
 }
 
+int _esp_transmit_cmd(esp_at_cfg *cfg, const char *cmd)
+{
+	const char *eot = "\r\n";
+	char outstr[256];
+
+	/* Add CR and LF to string */
+	strlcpy(outstr, cmd, ARRAY_LEN(outstr) - strlen(eot) - 1);
+	strlcat(outstr, eot, ARRAY_LEN(outstr) - 1);
+
+	DEBUGDATA("ESP RX is", outstr, "%s");
+
+	/* Semi-blocking with hard-coded timeout */
+	if (uart_pio_puts_timeout(&cfg->uart_cfg, outstr,
+				  _ESP_UART_WAIT_US)) {
+		return 0;
+	}
+
+	DEBUGMSG("ESP send cmd timeout");
+
+	/* Flush TX on failure */
+	uart_pio_flush_tx(&cfg->uart_cfg);
+
+	return -1;
+}
+
+int _esp_receive_response(esp_at_cfg *cfg, char *rsp, size_t len)
+{
+	int rslt = 0;
+	memset(rsp, '\0', sizeof(char) * len);
+
+	for (unsigned int i = 0; i < len - 1; i++) {
+		char *c = &rsp[i];
+
+		if (!uart_pio_getc_timeout(&cfg->uart_cfg, c,
+					   _ESP_UART_WAIT_US)) {
+			DEBUGMSG("ESP response timeout");
+			break;
+		}
+
+		if (!_esp_check_at_end_sequence(rsp))
+			continue;
+
+		DEBUGMSG("Found AT end sequence");
+		DEBUGDATA("AT Response so far", rsp, "%s");
+
+		/* rslt = 1 for OK, -1 for ERROR, and 0 if no match */
+		if ((rslt = _esp_check_rsp_success(rsp)))
+			break;
+
+		/* DEBUGDATA("AT Response so far", rsp, "%s"); */
+	}
+
+	switch (rslt) {
+	case 1:
+		/* Return number of characters read if successful */
+		DEBUGMSG("Received AT response OK for command");
+		return strlen(rsp);
+	case 0:
+		DEBUGMSG("Received no AT response before buffer filled command");
+		break;
+	default:
+		/* Ran out of buffer before received OK or ERROR */
+		DEBUGMSG("Received AT response ERROR for command");
+		break;
+	}
+
+	return -1;
+}
+
+bool _esp_check_at_end_sequence(const char *rsp)
+{
+	const char *endseq = "\r\n";
+	unsigned int len = strlen(rsp);
+
+	if (len < 2)
+		return false;
+
+	return !strncmp(&rsp[len - 2], endseq,
+			strlen(endseq) * sizeof(char));
+}
+
+int _esp_check_rsp_success(const char *rsp)
+{
+	const char *okptrn = "OK\r\n";
+	const char *errptrn = "ERROR\r\n";
+
+	const int len = strlen(rsp);
+	const int okpos = len - (int) strlen(okptrn);
+	const int errpos = len - (int) strlen(errptrn);
+
+	if (okpos >= 0 && !strcmp(&rsp[okpos], okptrn)) {
+		DEBUGMSG("Received AT response OK for command");
+
+		return 1;
+	}
+
+	if (errpos >= 0 && !strcmp(&rsp[errpos], errptrn)) {
+		DEBUGMSG("Received AT response ERROR for command");
+
+		return -1;
+	}
+
+	return 0;
+}

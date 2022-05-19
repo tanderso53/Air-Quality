@@ -2,3 +2,6 @@ cmake_minimum_required(VERSION 3.22)
 
 add_subdirectory(
   ${CMAKE_CURRENT_LIST_DIR}/at-parse)
+
+add_subdirectory(
+  ${CMAKE_CURRENT_LIST_DIR}/uart-pio)

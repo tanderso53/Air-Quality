@@ -26,6 +26,7 @@ typedef struct {
 
 static bool _aq_stdio_is_init = false;
 static aq_status *_aq_s = NULL;
+static esp_at_cfg *_esp_cfg = NULL;
 static esp_at_status *_esp_s = NULL;
 static _aq_iobuf _buffers[AQ_STDIO_BUFFER_NUM];
 static semaphore_t _sem;
@@ -46,6 +47,7 @@ void aq_stdio_init(aq_status *s, esp_at_status *e)
 {
 	_aq_s = s;
 	_esp_s = e;
+	_esp_cfg = e->cfg;
 
 	for (size_t i = 0; i < ARRAY_LEN(_buffers); ++i) {
 		/* One permit for UART, one for WiFi */
@@ -197,9 +199,17 @@ void _aq_send_wifi(void *buf)
 	_aq_iobuf *s = (_aq_iobuf*) buf;
 
 	if (_aq_s->status & AQ_STATUS_I_CLIENT_CONNECTED) {
+		int rslt = 0;
+
 		DEBUGDATA("Attempting to write WiFi", s->buf, "%s");
-		esp_at_cipsend_string(s->buf, sizeof(s->buf),
-				      _esp_s);
+		rslt = esp_at_cipsend_string(_esp_cfg, s->buf,
+					     sizeof(s->buf), _esp_s);
+
+		if (rslt < 0) {
+			_aq_s->status |= AQ_STATUS_E_WIFI_FAIL;
+		} else {
+			_aq_s->status &= ~AQ_STATUS_E_WIFI_FAIL;
+		}
 	}
 
 	DEBUGMSG("WIFI send complete, releasing buffer sem");
