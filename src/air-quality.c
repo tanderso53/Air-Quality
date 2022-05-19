@@ -706,6 +706,7 @@ int main() {
 	next_sample_time = make_timeout_time_ms(sample_delay_ms);
 
 	/* Initialize stdio processing thread */
+	aq_wifi_set_flags(&status);
 	aq_stdio_init(&status, &aq_wifi_status);
 
 	/* Keep polling the sensor for data if initialization was

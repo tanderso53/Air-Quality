@@ -55,7 +55,7 @@
 #define _ESP_EN_DELAY_US 5000000
 #define _ESP_RESET_HOLD_US 20000
 #define _ESP_RESPONSE_BUFFER_LEN 2048
-#define _ESP_UART_WAIT_US 1000000
+#define _ESP_UART_WAIT_US 500000
 
 #define ARRAY_LEN(array) sizeof(array)/sizeof(array[0])
 
@@ -229,7 +229,7 @@ int esp_at_send_cmd(esp_at_cfg *cfg, const char *cmd, char *rsp,
 
 	/* Remove any junk that found its way into the RX buffer
 	 * before we try any commands */
-	/* uart_pio_flush_rx(&cfg->uart_cfg); */
+	uart_pio_flush_rx(&cfg->uart_cfg);
 
 	/* Returns 0 if successful */
 	rslt = _esp_transmit_cmd(cfg, cmd);
@@ -714,7 +714,7 @@ int _esp_transmit_cmd(esp_at_cfg *cfg, const char *cmd)
 	DEBUGMSG("ESP send cmd timeout");
 
 	/* Flush TX on failure */
-	/* uart_pio_flush_tx(&cfg->uart_cfg); */
+	uart_pio_flush_tx(&cfg->uart_cfg);
 
 	return -1;
 }
@@ -732,15 +732,6 @@ int _esp_receive_response(esp_at_cfg *cfg, char *rsp, size_t len)
 			DEBUGMSG("ESP response timeout");
 			break;
 		}
-		/* *c = uart_pio_getc_blocking(&cfg->uart_cfg); */
-		/* DEBUGDATA("Received Char", *c, "%u"); */
-
-		/* if (c) { */
-		/* 	rsp[i] = c; */
-		/* 	rsp[i + 1] = '\0'; /\* Make sure this is a valid string *\/ */
-		/* } else { */
-		/* 	--i; */
-		/* } */
 
 		if (!_esp_check_at_end_sequence(rsp))
 			continue;

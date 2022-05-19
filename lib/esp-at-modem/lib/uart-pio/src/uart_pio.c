@@ -121,5 +121,5 @@ void uart_pio_flush_tx(uart_pio_cfg *cfg)
 
 void uart_pio_flush_rx(uart_pio_cfg *cfg)
 {
-	pio_sm_clear_fifos(cfg->pio, cfg->sm_rx);
+	/* pio_sm_clear_fifos(cfg->pio, cfg->sm_rx); */
 }
