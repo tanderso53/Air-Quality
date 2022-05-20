@@ -388,11 +388,11 @@ void _aq_free_task(_aq_stdio_task *task)
 	}
 
 	if (!prevelem) {
-		_free_tasks = elem;
+		_free_tasks = task;
 	}
 
-	elem->prev = prevelem;
-	elem->next = NULL;
+	task->prev = prevelem;
+	task->next = NULL;
 
 	sem_release(&_task_sem);
 }
