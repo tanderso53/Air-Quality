@@ -386,6 +386,7 @@ void _esp_en_gpio_setup(esp_at_cfg *cfg)
 
 void _esp_reset_gpio_setup(esp_at_cfg *cfg)
 {
+#ifndef AIR_QUALITY_COMPILE_TARGET_WING
 	const uint gpin = cfg->reset_pin;
 
 	gpio_init(gpin);
@@ -396,6 +397,7 @@ void _esp_reset_gpio_setup(esp_at_cfg *cfg)
 
 	/* Set GPIO high to start in the non-reset position */
 	gpio_put(gpin, true);
+#endif
 }
 
 void _esp_set_enabled(esp_at_cfg *cfg, bool en)
@@ -408,6 +410,11 @@ void _esp_set_enabled(esp_at_cfg *cfg, bool en)
 
 void _esp_reset(esp_at_cfg *cfg)
 {
+#ifdef AIR_QUALITY_COMPILE_TARGET_WING
+	_esp_set_enabled(cfg, false);
+	sleep_us(_ESP_RESET_HOLD_US);
+	_esp_set_enabled(cfg, true);
+#else
 	const uint gpin = cfg->reset_pin;
 
 	gpio_put(gpin, false); /* Drive low to reset module */
@@ -415,6 +422,7 @@ void _esp_reset(esp_at_cfg *cfg)
 	sleep_us(_ESP_RESET_HOLD_US); /* Hold down reset for a bit */
 
 	gpio_put(gpin, true); /* Return reset pin to normal */
+#endif
 }
 
 int _esp_parse_cw_wifi_state(esp_at_cfg *cfg,
