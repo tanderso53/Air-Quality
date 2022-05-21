@@ -702,6 +702,21 @@ int main() {
 		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
 				       &status);
 
+		/* Check BME680 sensor status bit for relevent
+		 * warnings */
+		if (d.status & BME68X_HEAT_STAB_MSK)
+			aq_status_unset_status(AQ_STATUS_W_BME680_GAS_UNSTABLE,
+					       &status);
+		else
+			aq_status_set_status(AQ_STATUS_W_BME680_GAS_UNSTABLE,
+					     &status);
+		if (d.status & BME68X_GASM_VALID_MSK)
+			aq_status_unset_status(AQ_STATUS_W_BME680_GAS_INVALID,
+					       &status);
+		else
+			aq_status_set_status(AQ_STATUS_W_BME680_GAS_INVALID,
+					     &status);
+
 		aq_bme680_handle_error(ret, &status);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
