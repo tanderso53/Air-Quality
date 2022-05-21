@@ -1,6 +1,7 @@
 #include "bme680-interface.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #include "pico/stdlib.h"
 
@@ -54,60 +55,31 @@ int8_t bme680_i2c_write(uint8_t reg_addr, const uint8_t *reg_data,
 {
 	int num_bytes;
 	bme680_intf *intf = (bme680_intf*) intf_ptr;
+	uint8_t d[len + 1];
 
 	if (intf_ptr == NULL) {
 		return BME68X_E_NULL_PTR;
 	}
 
-	/* Write a byte with the register offset first but don't send
-	 * stop. Then begin the read that will start at that offset */
-		
-	for (uint32_t i = 0; i < len - 1; i++) {
-		uint8_t wrt_data[] = {reg_addr + i, reg_data[i]};
+	d[0] = reg_addr;
+	memcpy(&d[1], reg_data, len);
 
-		if (intf->timeout < 0) {
-			num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
-						       wrt_data, 2, true);
-		} else {
-			absolute_time_t to;
+	/* Use timeout only if set with value greater than 0, other
+	 * wise fully block */
+	if (intf->timeout > 0) {
+		absolute_time_t to = make_timeout_time_ms(intf->timeout);
 
-			to = make_timeout_time_ms(intf->timeout * 2);
-			num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-							     wrt_data, 2, true, to);
-
-			if (num_bytes == PICO_ERROR_TIMEOUT) {
-				return BME68X_E_COM_FAIL;
-			}
-		}
-
-		if (num_bytes == PICO_ERROR_GENERIC) {
-			return BME68X_E_COM_FAIL;
-		}
-	}
-
-	if (intf->timeout < 0) {
-		uint8_t wrt_data[] = {(len - 1) + reg_addr, reg_data[len - 1]};
-
-		num_bytes = i2c_write_blocking(intf->i2c, intf->dev_addr,
-					       wrt_data, 2, false);
+		num_bytes = i2c_write_blocking_until(intf->i2c,
+						     intf->dev_addr,
+						     d, len + 1,
+						     false, to);
 	} else {
-		absolute_time_t to;
-		uint8_t wrt_data[] = {(len - 1) + reg_addr, reg_data[len - 1]};
-
-		to = make_timeout_time_ms(intf->timeout);
-		num_bytes = i2c_write_blocking_until(intf->i2c, intf->dev_addr,
-						     wrt_data, 2, false, to);
-
-		if (num_bytes == PICO_ERROR_TIMEOUT) {
-			return BME68X_E_COM_FAIL;
-		}
+		num_bytes = i2c_write_blocking(intf->i2c,
+					       intf->dev_addr,
+					       d, len + 1, false);
 	}
 
-	if (num_bytes == PICO_ERROR_GENERIC) {
-		return BME68X_E_COM_FAIL;
-	}
-
-	return BME68X_OK;
+	return num_bytes == len + 1 ? BME68X_OK : BME68X_E_COM_FAIL;
 }
 
 void bme680_delay_us(uint32_t period, void *intf_ptr)
@@ -126,7 +98,7 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 		b_intf->i2c = i2c_default;
 	}
 
-	i2c_init(b_intf->i2c, 100000);
+	i2c_init(b_intf->i2c, 500000);
 
 	/* TODO: Alow gpio of non-default i2c pins to be set up */
 	gpio_set_function(PICO_DEFAULT_I2C_SDA_PIN, GPIO_FUNC_I2C);

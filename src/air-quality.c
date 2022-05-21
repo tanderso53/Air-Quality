@@ -176,42 +176,6 @@ static int8_t aq_bme280_init(bme280_intf *b_intf)
 	return 0;
 }
 
-static int8_t aq_hack_bme680()
-{
-	bme280_intf b_intf;
-	uint8_t settings_sel;
-
-	/* Set up device interface */
-	b_intf.addr = BME280_I2C_ADDR_PRIM;
-	b_intf.dev.intf_ptr = (void*) &b_intf;
-	b_intf.dev.intf = BME280_I2C_INTF;
-	b_intf.dev.read = user_i2c_read;
-	b_intf.dev.write = user_i2c_write;
-	b_intf.dev.delay_us = user_delay_us;
-
-	bme280_init(&b_intf.dev);
-
-	/* Configure oversampling */
-	b_intf.dev.settings.osr_h = BME280_OVERSAMPLING_1X;
-	b_intf.dev.settings.osr_p = BME280_OVERSAMPLING_16X;
-	b_intf.dev.settings.osr_t = BME280_OVERSAMPLING_2X;
-	b_intf.dev.settings.filter = BME280_FILTER_COEFF_16;
-
-	b_intf.dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
-
-	settings_sel = BME280_OSR_PRESS_SEL;
-	settings_sel |= BME280_OSR_TEMP_SEL;
-	settings_sel |= BME280_OSR_HUM_SEL;
-	settings_sel |= BME280_STANDBY_SEL;
-	settings_sel |= BME280_FILTER_SEL;
-
-	bme280_set_sensor_settings(settings_sel, &b_intf.dev);
-
-	bme280_set_sensor_mode(BME280_NORMAL_MODE, &b_intf.dev);
-
-	return 0;
-}
-
 static int8_t aq_bme280_configure(bme280_intf *b_intf,
 				  bme280_op_mode mode)
 {
@@ -684,8 +648,6 @@ int main() {
 
 	ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
 	aq_bme680_handle_error(ret, &status);
-
-	aq_hack_bme680(); /* Somehow this fixes bad data on BME680 */
 
 	/* Start BME280 */
 	ret = aq_bme280_init(&b280_intf);
