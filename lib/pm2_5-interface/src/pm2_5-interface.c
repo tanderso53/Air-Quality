@@ -43,6 +43,9 @@
 
 static void _pm2_5_fan_power_gpio_setup();
 static void _pm2_5_fan_power_set_enabled(bool en);
+#ifdef AIR_QUALITY_COMPILE_TARGET_WING
+static void _pm2_5_intf_reset_gpio_setup();
+#endif /* #ifdef AIR_QUALITY_COMPILE_TARGET_WING */
 
 int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 {
@@ -60,6 +63,11 @@ int8_t pm2_5_intf_init(pm2_5_intf *intf, uint tx, uint rx)
 	/* Enable fan power module */
 	_pm2_5_fan_power_gpio_setup();
 	_pm2_5_fan_power_set_enabled(true);
+
+#ifdef AIR_QUALITY_COMPILE_TARGET_WING
+	/* Make sure that the reset pin is high */
+	_pm2_5_intf_reset_gpio_setup();
+#endif /* #ifdef AIR_QUALITY_COMPILE_TARGET_WING */
 	sleep_ms(500); /* Make sure powered before initializing */
 
 	/* Initialize the uart interface */
@@ -167,6 +175,25 @@ void _pm2_5_fan_power_set_enabled(bool en)
 {
 	const uint gpin = PM2_5_INTERFACE_GPIO_EN_PIN;
 
+#ifdef AIR_QUALITY_COMPILE_TARGET_WING
+	/* High disabled, low enabled */
+	gpio_put(gpin, !en);
+#else
 	/* High enabled, low disabled */
 	gpio_put(gpin, en);
+#endif /* #ifdef AIR_QUALITY_COMPILE_TARGET_WING */
 }
+
+#ifdef AIR_QUALITY_COMPILE_TARGET_WING
+void _pm2_5_intf_reset_gpio_setup()
+{
+	const uint gpin = PM2_5_INTERFACE_GPIO_RESET_PIN;
+
+	/* Must be an output */
+	gpio_set_dir(gpin, true);
+	gpio_disable_pulls(gpin);
+
+	/* Pin should stay high. Bring low to reset */
+	gpio_put(gpin, true);
+}
+#endif /* #ifdef AIR_QUALITY_COMPILE_TARGET_WING */

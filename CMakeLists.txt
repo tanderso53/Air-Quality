@@ -20,6 +20,9 @@ option(AIR_QUALITY_WAIT "Wait on connection for application to begin"
 option(AIR_QUALITY_LOG_LEVEL_DEBUG "Enable debug messages to stdout"
   OFF)
 
+option(AIR_QUALITY_TARGET_WING "Compile for the Air Quality Wing variant"
+  ON)
+
 set(ESP_AT_MULTICORE ON)
 
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/lib)
@@ -38,7 +41,7 @@ target_sources(air-quality PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/src/aq-error-state.c
   ${CMAKE_CURRENT_LIST_DIR}/src/aq-stdio.c
   ${CMAKE_CURRENT_LIST_DIR}/src/ws2812.pio
-  )
+)
 
 pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
@@ -66,6 +69,16 @@ if (AIR_QUALITY_LOG_LEVEL_DEBUG)
 
   target_compile_definitions(air-quality PRIVATE
     AIR_QUALITY_LOG_DEBUG=1)
+
+endif()
+
+# Compile for wing
+if (AIR_QUALITY_TARGET_WING)
+
+  target_compile_definitions(air-quality PRIVATE
+    AIR_QUALITY_COMPILE_TARGET_WING=1
+    AIR_QUALITY_WIFI_GPIO_EN_PIN=7
+    PM2_5_INTERFACE_GPIO_EN_PIN=25)
 
 endif()
 

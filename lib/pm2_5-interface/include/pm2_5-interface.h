@@ -54,6 +54,10 @@
 #define PM2_5_INTERFACE_GPIO_EN_PIN 6
 #endif
 
+#ifndef PM2_5_INTERFACE_GPIO_RESET_PIN
+#define PM2_5_INTERFACE_GPIO_RESET_PIN 24
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* #ifdef __cplusplus */
