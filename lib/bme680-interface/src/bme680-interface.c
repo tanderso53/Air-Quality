@@ -87,8 +87,8 @@ void bme680_delay_us(uint32_t period, void *intf_ptr)
 	sleep_us(period);
 }
 
-int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
-		       bme680_run_mode mode)
+int bme680_init(bme680_intf *b_intf, uint8_t dev_addr,
+		bme680_run_mode mode)
 {
 	uint8_t ret;
 
@@ -151,8 +151,8 @@ int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
 	return 0;
 }
 
-int sample_bme680_sensor(bme680_run_mode mode, bme680_intf *b_intf,
-			 struct bme68x_data *d)
+int bme680_sample(bme680_run_mode mode, bme680_intf *b_intf,
+		  struct bme68x_data *d)
 {
 	uint8_t ret;
 	uint32_t dur;
@@ -192,7 +192,7 @@ int sample_bme680_sensor(bme680_run_mode mode, bme680_intf *b_intf,
 	return 1;
 }
 
-int deinit_bme680_sensor(bme680_intf *b_intf)
+int bme680_deinit(bme680_intf *b_intf)
 {
 	if (!b_intf->i2c) {
 		return 1;
@@ -203,7 +203,7 @@ int deinit_bme680_sensor(bme680_intf *b_intf)
 	return 0;
 }
 
-int8_t selftest_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr)
+int8_t bme680_selftest(bme680_intf *b_intf, uint8_t dev_addr)
 {
 	int8_t ret;
 
@@ -238,7 +238,7 @@ int8_t selftest_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr)
 	/* Run BME68x library selftest */
 	ret = bme68x_selftest_check(&b_intf->bme_dev);
 
-	deinit_bme680_sensor(b_intf);
+	bme680_deinit(b_intf);
 
 	return ret;
 }

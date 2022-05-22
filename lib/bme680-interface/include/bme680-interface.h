@@ -60,24 +60,24 @@ extern "C" {
 	 * mode is currently implemented.
 	 * Returns 0 if successful and non-zero on error
 	 */
-	int init_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr,
-			       bme680_run_mode mode);
+	int bme680_init(bme680_intf *b_intf, uint8_t dev_addr,
+			bme680_run_mode mode);
 
 	/**
 	 * @brief Read measurement from sensor and fill @p d struct
 	 */
-	int sample_bme680_sensor(bme680_run_mode mode, bme680_intf *b_intf,
+	int bme680_sample(bme680_run_mode mode, bme680_intf *b_intf,
 				 struct bme68x_data *d);
 
 	/**
 	 * @brief De-initialize pico-sdk's i2c interface
 	 */
-	int deinit_bme680_sensor(bme680_intf *b_intf);
+	int bme680_deinit(bme680_intf *b_intf);
 
 	/**
 	 * @brief Run BME680 Self Test
 	 */
-	int8_t selftest_bme680_sensor(bme680_intf *b_intf, uint8_t dev_addr);
+	int8_t bme680_selftest(bme680_intf *b_intf, uint8_t dev_addr);
 
 
 #ifdef __cplusplus

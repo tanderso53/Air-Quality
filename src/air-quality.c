@@ -646,7 +646,7 @@ int main() {
 	}
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
-	ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
+	ret = bme680_init(&b_intf, BME68X_I2C_ADDR_LOW, m);
 	aq_bme680_handle_error(ret, &status);
 
 	/* Start BME280 */
@@ -691,7 +691,7 @@ int main() {
 
 		aq_status_set_status(AQ_STATUS_I_BME680_READING,
 				     &status);
-		ret = sample_bme680_sensor(m, &b_intf, &d);
+		ret = bme680_sample(m, &b_intf, &d);
 
 		/* Get time before handling error so it's as close as
 		 * possible */
@@ -783,7 +783,7 @@ int main() {
 	}
 
 	/* Deinit i2c if loop broke */
-	deinit_bme680_sensor(&b_intf);
+	bme680_deinit(&b_intf);
 	pm2_5_intf_deinit(&p_intf);
 
 	return 1;
