@@ -47,8 +47,12 @@ pico_enable_stdio_usb(air-quality 1)
 pico_enable_stdio_uart(air-quality 0)
 
 target_link_libraries(air-quality pico_stdlib hardware_i2c hardware_pio
-  hardware_uart bme280-interface bme680-interface pm2_5-sensor-interface 
+  hardware_uart bme680-interface pm2_5-sensor-interface
   hardware_adc esp-at-modem debugmsg pico_multicore pico_util)
+
+#########################
+# Process CMAKE options #
+#########################
 
 if(AIR_QUALITY_SELF_TEST)
 
@@ -82,4 +86,5 @@ if (AIR_QUALITY_TARGET_WING)
 
 endif()
 
+# Need this to get our .uf2
 pico_add_extra_outputs(air-quality)
