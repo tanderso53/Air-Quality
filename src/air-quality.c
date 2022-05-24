@@ -142,7 +142,7 @@ void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 
 	aq_nprintf("{\"name\": \"gas resistance\", "
 		   "\"value\": %.2f, "
-		   "\"unit\": \"ul\", "
+		   "\"unit\": \"Ohms\", "
 		   "\"timemillis\": %lu}], ",
 		   d->gas_resistance, (unsigned long) millis);
 
