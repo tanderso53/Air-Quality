@@ -585,10 +585,20 @@ int main() {
 		aq_nprintf("{\"program\": \"%s\", \"board\": \"%s\", "
 			   "\"status\": %lu, "
 			   "\"ip address\": \"%s/%d\", "
+			   "\"status masks\": {"
+			   "\"wait\": %lu, "
+			   "\"info\": %lu, "
+			   "\"warning\": %lu, "
+			   "\"error\": %lu"
+			   "}, "
 			   "\"output\": [",
 			   PICO_TARGET_NAME, PICO_BOARD, status.status,
 			   aq_wifi_status.ipv4,
-			   aq_abrev_netmask(aq_wifi_status.ipv4_netmask));
+			   aq_abrev_netmask(aq_wifi_status.ipv4_netmask),
+			   AQ_STATUS_MASK_WAIT,
+			   AQ_STATUS_MASK_INFO,
+			   AQ_STATUS_MASK_WARNING,
+			   AQ_STATUS_MASK_ERROR);
 
 		aq_print_batt(&status);
 
