@@ -1,6 +1,4 @@
 #include "bme680-interface.h"
-#include "bme280-interface.h"
-#include "bme280-interface-error.h"
 #include "pm2_5-interface.h"
 #include <pm2_5-error.h>
 #include "esp-at-modem.h"
@@ -108,8 +106,6 @@ void air_quality_print_data(struct bme68x_data *d, uint32_t millis);
 
 static void aq_bme680_handle_error(int8_t i_errno, aq_status *s);
 
-static void aq_bme280_handle_error(int8_t i_errno, aq_status *s);
-
 static void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s);
 
 static void aq_wifi_set_flags(aq_status *s);
@@ -146,192 +142,13 @@ void air_quality_print_data(struct bme68x_data *d, uint32_t millis)
 
 	aq_nprintf("{\"name\": \"gas resistance\", "
 		   "\"value\": %.2f, "
-		   "\"unit\": \"ul\", "
+		   "\"unit\": \"Ohms\", "
 		   "\"timemillis\": %lu}], ",
 		   d->gas_resistance, (unsigned long) millis);
 
 	aq_nprintf("\"status\": {"
 		   "\"sensor\": \"%#x\"}}",
 		   d->status);
-}
-
-static int8_t aq_bme280_init(bme280_intf *b_intf)
-{
-	int8_t rslt;
-
-	/* Set up device interface */
-	b_intf->addr = BME280_I2C_ADDR_SEC;
-	b_intf->dev.intf_ptr = (void*) b_intf;
-	b_intf->dev.intf = BME280_I2C_INTF;
-	b_intf->dev.read = user_i2c_read;
-	b_intf->dev.write = user_i2c_write;
-	b_intf->dev.delay_us = user_delay_us;
-
-	rslt = bme280_init(&b_intf->dev);
-
-	if (rslt != BME280_OK) {
-		return rslt;
-	}
-
-	return 0;
-}
-
-static int8_t aq_hack_bme680()
-{
-	bme280_intf b_intf;
-	uint8_t settings_sel;
-
-	/* Set up device interface */
-	b_intf.addr = BME280_I2C_ADDR_PRIM;
-	b_intf.dev.intf_ptr = (void*) &b_intf;
-	b_intf.dev.intf = BME280_I2C_INTF;
-	b_intf.dev.read = user_i2c_read;
-	b_intf.dev.write = user_i2c_write;
-	b_intf.dev.delay_us = user_delay_us;
-
-	bme280_init(&b_intf.dev);
-
-	/* Configure oversampling */
-	b_intf.dev.settings.osr_h = BME280_OVERSAMPLING_1X;
-	b_intf.dev.settings.osr_p = BME280_OVERSAMPLING_16X;
-	b_intf.dev.settings.osr_t = BME280_OVERSAMPLING_2X;
-	b_intf.dev.settings.filter = BME280_FILTER_COEFF_16;
-
-	b_intf.dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
-
-	settings_sel = BME280_OSR_PRESS_SEL;
-	settings_sel |= BME280_OSR_TEMP_SEL;
-	settings_sel |= BME280_OSR_HUM_SEL;
-	settings_sel |= BME280_STANDBY_SEL;
-	settings_sel |= BME280_FILTER_SEL;
-
-	bme280_set_sensor_settings(settings_sel, &b_intf.dev);
-
-	bme280_set_sensor_mode(BME280_NORMAL_MODE, &b_intf.dev);
-
-	return 0;
-}
-
-static int8_t aq_bme280_configure(bme280_intf *b_intf,
-				  bme280_op_mode mode)
-{
-	int8_t rslt;
-	uint8_t settings_sel;
-
-	/* Configure oversampling */
-	b_intf->dev.settings.osr_h = BME280_OVERSAMPLING_1X;
-	b_intf->dev.settings.osr_p = BME280_OVERSAMPLING_16X;
-	b_intf->dev.settings.osr_t = BME280_OVERSAMPLING_2X;
-	b_intf->dev.settings.filter = BME280_FILTER_COEFF_16;
-
-	switch (mode) {
-	case BME280_IFACE_NORMAL_MODE:
-		b_intf->dev.settings.standby_time = BME280_STANDBY_TIME_62_5_MS;
-
-		settings_sel = BME280_OSR_PRESS_SEL;
-		settings_sel |= BME280_OSR_TEMP_SEL;
-		settings_sel |= BME280_OSR_HUM_SEL;
-		settings_sel |= BME280_STANDBY_SEL;
-		settings_sel |= BME280_FILTER_SEL;
-
-		rslt = bme280_set_sensor_settings(settings_sel, &b_intf->dev);
-
-		if (rslt != BME280_OK) {
-			return rslt;
-		}
-
-		rslt = bme280_set_sensor_mode(BME280_NORMAL_MODE, &b_intf->dev);
-
-		if (rslt != BME280_OK) {
-			return rslt;
-		}
-
-		break;
-
-	case BME280_IFACE_FORCED_MODE:
-		break;
-
-	default:
-		break;
-	}
-
-	return 0;
-}
-
-int8_t aq_bme280_sample(bme280_intf *b_intf)
-{
-	int8_t rslt;
-
-	rslt = bme280_get_sensor_data(BME280_ALL, &b_intf->data,
-				      &b_intf->dev);
-
-	if (rslt != BME280_OK) {
-		return rslt;
-	}
-
-	return 0;
-}
-
-void aq_bme280_print_data(bme280_intf *b_intf, unsigned long millis)
-{
-	struct bme280_data *d = &b_intf->data;
-
-	aq_nprintf("{\"sensor\": \"BME280\", "
-		   "\"data\": [");
-
-	aq_nprintf("{\"name\": \"temperature\", "
-		   "\"value\": %0.2f, "
-		   "\"unit\": \"degC\", "
-		   "\"timemillis\": %lu}, ",
-		   d->temperature, millis);
-
-	aq_nprintf("{\"name\": \"pressure\", "
-		   "\"value\": %0.2f, "
-		   "\"unit\": \"Pa\", "
-		   "\"timemillis\": %lu}, ",
-		   d->pressure, millis);
-
-	aq_nprintf("{\"name\": \"humidity\", "
-		   "\"value\": %0.2f, "
-		   "\"unit\": \"%%\", "
-		   "\"timemillis\": %lu}]}",
-		   d->humidity, millis);
-}
-
-void aq_bme280_handle_error(int8_t i_errno, aq_status *s)
-{
-	char level[16];
-	if (i_errno == BME280_OK) {
-		/* All errors/warnings will clear on successful
-		 * library operation */
-		aq_status_unset_status(AQ_STATUS_REGION_BME280 ^
-				       AQ_STATUS_I_BME280_READING, s);
-		return;
-	}
-
-	switch (bme280_iface_err_level(i_errno)) {
-	case INFO:
-		strcpy(level, "INFO");
-		break;
-	case WARNING:
-		strcpy(level, "WARNING");
-
-		/* Currently the only warning enumerated for BME280 */
-		aq_status_set_status(AQ_STATUS_W_BME280_OSR_INVALID, s);
-		break;
-	case ERROR:
-		strcpy(level, "ERROR");
-		/* BME280 will be removed when VOCs are working, so
-		 * don't worry about enumerating errors furthur */
-		aq_status_set_status(AQ_STATUS_E_BME280_GENERAL_FAIL, s);
-		break;
-	default:
-		strcpy(level, "UNKNOWN");
-		break;
-	}
-
-	printf("%s: %s\n", level,
-	       bme280_iface_err_description(i_errno));
 }
 
 void aq_bme680_handle_error(int8_t i_errno, aq_status *s)
@@ -423,7 +240,7 @@ void aq_pm2_5_print_data(pm2_5_dev *dev, pm2_5_data *d,
 void aq_pm2_5_handle_error(int8_t i_errno, aq_status *s)
 {
 	char level[16];
-	if (i_errno == BME280_OK) {
+	if (i_errno == PM2_5_OK) {
 		/* All errors/warnings will clear on successful
 		 * library operation */
 		aq_status_unset_status(AQ_STATUS_REGION_PM2_5 ^
@@ -577,7 +394,6 @@ int main() {
 
 	/* Interfaces */
 	bme680_intf b_intf;
-	bme280_intf b280_intf;
 	pm2_5_intf p_intf;
 	aq_status status = {
 		.led_pio = pio0,
@@ -682,17 +498,8 @@ int main() {
 	}
 #endif /* #ifdef AIR_QUALITY_WAIT_CONNECTION */
 
-	ret = init_bme680_sensor(&b_intf, BME68X_I2C_ADDR_LOW, m);
+	ret = bme680_init(&b_intf, BME68X_I2C_ADDR_LOW, m);
 	aq_bme680_handle_error(ret, &status);
-
-	aq_hack_bme680(); /* Somehow this fixes bad data on BME680 */
-
-	/* Start BME280 */
-	ret = aq_bme280_init(&b280_intf);
-	aq_bme280_handle_error(ret, &status);
-
-	ret = aq_bme280_configure(&b280_intf, BME280_IFACE_NORMAL_MODE);
-	aq_bme280_handle_error(ret, &status);
 
 	/* Start PM2_5 Sensor */
 	p_intf.uart = AIR_QUALITY_PM2_5_UART;
@@ -729,7 +536,7 @@ int main() {
 
 		aq_status_set_status(AQ_STATUS_I_BME680_READING,
 				     &status);
-		ret = sample_bme680_sensor(m, &b_intf, &d);
+		ret = bme680_sample(m, &b_intf, &d);
 
 		/* Get time before handling error so it's as close as
 		 * possible */
@@ -740,6 +547,21 @@ int main() {
 		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
 				       &status);
 
+		/* Check BME680 sensor status bit for relevent
+		 * warnings */
+		if (d.status & BME68X_HEAT_STAB_MSK)
+			aq_status_unset_status(AQ_STATUS_W_BME680_GAS_UNSTABLE,
+					       &status);
+		else
+			aq_status_set_status(AQ_STATUS_W_BME680_GAS_UNSTABLE,
+					     &status);
+		if (d.status & BME68X_GASM_VALID_MSK)
+			aq_status_unset_status(AQ_STATUS_W_BME680_GAS_INVALID,
+					       &status);
+		else
+			aq_status_set_status(AQ_STATUS_W_BME680_GAS_INVALID,
+					     &status);
+
 		aq_bme680_handle_error(ret, &status);
 
 		if (ret == BME68X_W_NO_NEW_DATA) {
@@ -749,14 +571,6 @@ int main() {
 		if (ret < 0) {
 			break;
 		}
-
-		/* BME280 READ */
-		aq_status_set_status(AQ_STATUS_I_BME680_READING,
-				     &status);
-		ret = aq_bme280_sample(&b280_intf);
-		aq_status_unset_status(AQ_STATUS_I_BME680_READING,
-				       &status);
-		aq_bme280_handle_error(ret, &status);
 
 		/* PM2.5 READ */
 		aq_status_set_status(AQ_STATUS_I_PM2_5_READING,
@@ -782,10 +596,6 @@ int main() {
 
 		air_quality_print_data(&d, to_ms_since_boot(readtime));
 
-		aq_nprintf(", ");
-
-		aq_bme280_print_data(&b280_intf, to_ms_since_boot(readtime));
-
 		if (print_pm) {
 			aq_nprintf(", ");
 
@@ -806,7 +616,7 @@ int main() {
 	}
 
 	/* Deinit i2c if loop broke */
-	deinit_bme680_sensor(&b_intf);
+	bme680_deinit(&b_intf);
 	pm2_5_intf_deinit(&p_intf);
 
 	return 1;

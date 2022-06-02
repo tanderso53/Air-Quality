@@ -1,9 +1,6 @@
 [submodule "BME68x-Sensor-API"]
 	path = lib/bme680-interface/lib/BME68x-Sensor-API
 	url = https://github.com/BoschSensortec/BME68x-Sensor-API.git
-[submodule "BME280_driver"]
-	path = lib/bme280-interface/lib/BME280_driver
-	url = https://github.com/BoschSensortec/BME280_driver.git
 [submodule "pm2_5-sensor-api"]
 	path = lib/pm2_5-interface/lib/pm2_5-sensor-api
 	url = https://www.thecrib.dev/driver-development/pm2_5-sensor-api.git
