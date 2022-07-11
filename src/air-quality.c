@@ -518,7 +518,7 @@ int main() {
 	aq_stdio_init(&status, &aq_wifi_status);
 
 	/* Start the watchdog to require update every two cycles */
-	watchdog_enable(20000, true);
+	watchdog_enable(5000, true);
 
 	/* Keep polling the sensor for data if initialization was
 	 * successful. This loop will only break on error. */
@@ -629,7 +629,12 @@ int main() {
 		/* Tell stdio core to sleep when done, and sleep this
 		 * core until next sample time */
 		aq_stdio_sleep_until(next_sample_time);
-		sleep_until(next_sample_time);
+
+		while (absolute_time_diff_us(get_absolute_time(),
+					     next_sample_time) > 0) {
+			sleep_ms(100);
+			watchdog_update();
+		}
 	}
 
 	/* Deinit i2c if loop broke */
