@@ -15,6 +15,7 @@
 
 #include "pico/stdlib.h"
 #include "hardware/adc.h"
+#include "hardware/watchdog.h"
 
 #ifndef AIR_QUALITY_INFO_LED_PIN
 #define AIR_QUALITY_INFO_LED_PIN 16
@@ -516,11 +517,17 @@ int main() {
 	aq_wifi_set_flags(&status);
 	aq_stdio_init(&status, &aq_wifi_status);
 
+	/* Start the watchdog to require update every two cycles */
+	watchdog_enable(20000, true);
+
 	/* Keep polling the sensor for data if initialization was
 	 * successful. This loop will only break on error. */
 	for (;;) {
 		absolute_time_t readtime;
 		uint8_t print_pm = 0;
+
+		/* Check-in with the watchdog */
+		watchdog_update();
 
 		/* Check USB STDIO */
 		if (stdio_usb_connected()) {
