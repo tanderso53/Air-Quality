@@ -3,4 +3,4 @@
 	url = https://github.com/BoschSensortec/BME68x-Sensor-API.git
 [submodule "pm2_5-sensor-api"]
 	path = lib/pm2_5-interface/lib/pm2_5-sensor-api
-	url = https://www.thecrib.dev/driver-development/pm2_5-sensor-api.git
+	url = ../../driver-development/pm2_5-sensor-api.git

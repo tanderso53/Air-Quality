@@ -1,0 +1,16 @@
+variables:
+  GIT_SUBMODULE_STRATEGY: recursive
+
+build1:
+  stage: build
+  script:
+    - git clone --depth=1 --recursive https://github.com/raspberrypi/pico-sdk.git lib/pico-sdk; 
+    - export PICO_SDK_PATH=$PWD/lib/pico-sdk
+    - export PICO_TOOLCHAIN_PATH=/usr/local/gcc-arm-embedded
+    - cmake -DCMAKE_BUILD_TYPE=Release -DPICO_BOARD=adafruit_feather_rp2040 -S . -B build
+    - cmake --build build
+  artifacts:
+    paths:
+        - build/air-quality.uf2
+        - build/air-quality.elf
+    expire_in: 2 hrs
